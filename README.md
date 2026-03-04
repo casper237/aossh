@@ -1,40 +1,50 @@
-# AOSSH ⚡
+# AOSSH
 
-AOS SSH & SFTP Client.
+A cross-platform SSH & SFTP client built with Electron.
 
-## Требования
+## Features
 
-- [Node.js LTS](https://nodejs.org) (v18 или новее)
+- **SSH Terminal** — interactive shell with xterm.js
+- **SFTP File Manager** — browse, upload, download and delete files
+- **Connection Manager** — organize servers with groups and subgroups
+- **Context Menu** — connect, edit, move, delete via right-click
+- **Clipboard Support** — Ctrl+V and right-click paste in terminal
+- **Export / Import** — backup and restore your connections
+- **Multi-tab** — connect to multiple servers at once
 
-## Запуск
+## Getting Started
+
+### Requirements
+
+- [Node.js](https://nodejs.org/) v18+
+- npm
+
+### Install & Run
 
 ```bash
-# 1. Установить зависимости
 npm install
-
-# 2. Запустить приложение
 npm start
 ```
 
-## Сборка .exe установщика
+### Build
 
 ```bash
 npm run build
 ```
 
-Установщик появится в папке `dist/`.
+Installer will be created in the `dist/` folder.
 
-## Возможности
+## Usage
 
-- ✅ SSH терминал с xterm.js
-- ✅ SFTP файловый менеджер (просмотр, скачивание, загрузка, удаление, создание папок)
-- ✅ Менеджер подключений (сохранение серверов в файл)
-- ✅ Поддержка Password и SSH Key аутентификации
-- ✅ Вкладки (несколько сессий одновременно)
-- ✅ 3 темы: Dark, Light, Midnight
-- ✅ Нативное окно без рамки
+| Action | Result |
+|--------|--------|
+| Single click on server | Select |
+| Double click on server | Connect |
+| Right click on server | Context menu (Connect / Edit / Move / Delete) |
+| Right click on group | Add subgroup / Rename / Delete |
+| Ctrl+V in terminal | Paste from clipboard |
+| Right click in terminal | Paste from clipboard |
 
-## Хранение данных
+## License
 
-Серверы сохраняются в:
-- Windows: `%APPDATA%\nexusssh\connections.json`
+MIT
