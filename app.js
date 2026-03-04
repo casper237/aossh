@@ -27,13 +27,12 @@ function render() {
       <div class="titlebar-tools">
         <button class="tools-btn" onclick="toggleToolsMenu(event)" title="Tools">⚙</button>
         <div class="tools-menu" id="tools-menu" style="display:none">
-          <div class="ctx-section">Connections</div>
-          <div class="ctx-item" onclick="exportConnections()">Export...</div>
+          <div class="ctx-item" onclick="exportConnections()">📤 Export connections...</div>
           <div class="ctx-divider"></div>
-          <div class="ctx-section">Import</div>
-          <div class="ctx-item" onclick="importConnections('merge')">AOSSH — merge</div>
-          <div class="ctx-item" onclick="importConnections('replace')">AOSSH — replace all</div>
-          <div class="ctx-item" onclick="importFromMobaXterm()">MobaXterm</div>
+          <div class="ctx-item" onclick="importConnections('merge')">📥 Import AOSSH — merge...</div>
+          <div class="ctx-item" onclick="importConnections('replace')">🔄 Import AOSSH — replace all...</div>
+          <div class="ctx-divider"></div>
+          <div class="ctx-item" onclick="importFromMobaXterm()">📥 Import from MobaXterm...</div>
         </div>
       </div>
       <div class="win-controls">

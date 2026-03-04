@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
 
   exportConnections: () => ipcRenderer.invoke('config:export'),
   importConnections: () => ipcRenderer.invoke('config:import'),
+  importMobaXterm:   () => ipcRenderer.invoke('config:import:mobaxterm'),
 
   loadConnections: () => ipcRenderer.invoke('config:load'),
   saveConnections: d  => ipcRenderer.invoke('config:save', d),

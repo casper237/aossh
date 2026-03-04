@@ -172,6 +172,85 @@ ipcMain.handle('config:export', async () => {
   return { ok: true };
 });
 
+ipcMain.handle('config:import:mobaxterm', async () => {
+  const { filePaths } = await dialog.showOpenDialog({
+    title: 'Import from MobaXterm',
+    filters: [{ name: 'MobaXterm Sessions', extensions: ['mxtsessions'] }],
+    properties: ['openFile'],
+  });
+  if (!filePaths?.length) return { cancelled: true };
+  try {
+    const text = fs.readFileSync(filePaths[0], 'utf8');
+    const lines = text.split(/\r?\n/);
+    const connections = [];
+    let currentGroup = 'Imported';
+    let currentSubgroup = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      // Section header
+      if (line.startsWith('[Bookmarks')) {
+        // Look ahead for SubRep
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const next = lines[j].trim();
+          if (next.startsWith('SubRep=')) {
+            const subRep = next.slice(7).trim();
+            if (subRep.includes('\\')) {
+              const parts = subRep.split('\\');
+              currentGroup    = parts[0];
+              currentSubgroup = parts[1] || null;
+            } else {
+              currentGroup    = subRep || 'Imported';
+              currentSubgroup = null;
+            }
+            break;
+          }
+        }
+        continue;
+      }
+
+      // Skip service lines
+      if (line.startsWith('SubRep=') || line.startsWith('ImgNum=')) continue;
+
+      // Parse connection: name=#109#0%host%port%username%password%...
+      const eqIdx = line.indexOf('=');
+      if (eqIdx === -1) continue;
+      const name = line.slice(0, eqIdx).trim();
+      const val  = line.slice(eqIdx + 1).trim();
+
+      // Must be SSH type (#109#)
+      if (!val.includes('#109#')) continue;
+
+      // Extract the data part after #109#
+      const dataMatch = val.match(/#109#0%([^#]+)/);
+      if (!dataMatch) continue;
+
+      const parts    = dataMatch[1].split('%');
+      const host     = parts[0] || '';
+      const port     = parseInt(parts[1]) || 22;
+      const username = parts[2] || 'root';
+      const password = parts[3] || '';
+
+      if (!host) continue;
+
+      connections.push({
+        id: Date.now() + Math.random(),
+        name, host, port, username,
+        password: password || '',
+        authType: 'password',
+        privateKey: null,
+        group:    currentGroup,
+        subgroup: currentSubgroup,
+        status:   'offline',
+      });
+    }
+
+    return { ok: true, data: connections };
+  } catch(e) { return { error: e.message }; }
+});
+
 ipcMain.handle('config:import', async () => {
   const { filePaths } = await dialog.showOpenDialog({
     title: 'Import Connections',
