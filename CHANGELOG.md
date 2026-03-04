@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.0] - 2026-03-05
+### Added
+- Import connections from MobaXterm (.mxtsessions)
+- Tools menu ⚙ in titlebar (Export / Import)
+- Invisible drag zone in titlebar when tabs are open
+
+### Fixed
+- Tools menu text wrapping
+- Tools menu icon alignment
+
 ## [1.0.3] - 2026-03-04
 ### Fixed
 - Titlebar drag zone now starts right after the last tab
