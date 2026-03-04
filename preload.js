@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   clipboardRead:  () => ipcRenderer.invoke('clipboard:read'),
   clipboardWrite: t  => ipcRenderer.invoke('clipboard:write', t),
 
+  browseFile: o => ipcRenderer.invoke('dialog:browse', o),
+
   exportConnections: () => ipcRenderer.invoke('config:export'),
   importConnections: () => ipcRenderer.invoke('config:import'),
   importMobaXterm:   () => ipcRenderer.invoke('config:import:mobaxterm'),

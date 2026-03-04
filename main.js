@@ -161,6 +161,15 @@ ipcMain.handle('config:save', (_, data) => {
   return { ok: true };
 });
 
+ipcMain.handle('dialog:browse', async (_, opts) => {
+  const { filePaths } = await dialog.showOpenDialog({
+    title: opts?.title || 'Select File',
+    filters: opts?.filters || [{ name: 'All Files', extensions: ['*'] }],
+    properties: ['openFile'],
+  });
+  return filePaths?.[0] || null;
+});
+
 ipcMain.handle('config:export', async () => {
   const { filePath } = await dialog.showSaveDialog({
     title: 'Export Connections',

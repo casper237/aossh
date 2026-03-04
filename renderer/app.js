@@ -710,7 +710,12 @@ function openModal(editId=null, prefillGroup=null, prefillSub=null) {
           <label>Password</label><input id="m-pass" type="password" value="${escHtml(c.password||'')}" placeholder="••••••••" />
         </div>
         <div class="form-group" id="m-key-group" style="${c.authType==='key'?'':'display:none'}">
-          <label>Private Key Path</label><input id="m-key" value="${escHtml(c.privateKey||'')}" placeholder="C:\\Users\\you\\.ssh\\id_rsa" />
+          <label>Private Key Path</label>
+          <div style="display:flex;gap:8px">
+            <input id="m-key" value="${escHtml(c.privateKey||'')}" placeholder="C:\\Users\\you\\.ssh\\id_rsa" style="flex:1" />
+            <button class="btn" type="button" onclick="browseKeyFile()" style="white-space:nowrap;flex-shrink:0">Browse...</button>
+          </div>
+        </div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -758,6 +763,17 @@ function onGroupChange(val) {
 
 function onSubChange(val) {
   document.getElementById('m-newsub-wrap').style.display = val==='__new__' ? '' : 'none';
+}
+
+async function browseKeyFile() {
+  const result = await window.api.browseFile({
+    title: 'Select Private Key',
+    filters: [
+      { name: 'Private Key', extensions: ['pem', 'ppk', 'key', 'rsa'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (result) document.getElementById('m-key').value = result;
 }
 
 function toggleAuth(v) {
