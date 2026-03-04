@@ -78,7 +78,7 @@ body { font-family: 'Segoe UI', sans-serif; background:#0d1117; color:#e6edf3; h
 .empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:#484f58; }
 .empty-state .big { font-size:48px; }
 .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; z-index:100; backdrop-filter:blur(4px); }
-.modal { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:24px; width:420px; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+.modal { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:24px; width:400px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6); }
 .modal h2 { margin-bottom:18px; font-size:16px; display:flex; justify-content:space-between; align-items:center; }
 .form-group { margin-bottom:12px; }
 .form-group label { display:block; font-size:11px; color:#8b949e; margin-bottom:4px; }
@@ -87,6 +87,9 @@ body { font-family: 'Segoe UI', sans-serif; background:#0d1117; color:#e6edf3; h
 .form-group select option { background:#21262d; }
 .form-row { display:flex; gap:8px; }
 .form-row .form-group { flex:1; }
+.key-input-row { display:flex; gap:8px; align-items:center; }
+.key-input-row input { flex:1; min-width:0; }
+.key-input-row .btn { flex-shrink:0; white-space:nowrap; width:90px; }
 .modal-actions { display:flex; gap:8px; margin-top:16px; }
 .modal-actions .btn { flex:1; justify-content:center; }
 ::-webkit-scrollbar { width:6px; height:6px; }

@@ -711,11 +711,10 @@ function openModal(editId=null, prefillGroup=null, prefillSub=null) {
         </div>
         <div class="form-group" id="m-key-group" style="${c.authType==='key'?'':'display:none'}">
           <label>Private Key Path</label>
-          <div style="display:flex;gap:8px">
-            <input id="m-key" value="${escHtml(c.privateKey||'')}" placeholder="C:\\Users\\you\\.ssh\\id_rsa" style="flex:1" />
-            <button class="btn" type="button" onclick="browseKeyFile()" style="white-space:nowrap;flex-shrink:0">Browse...</button>
+          <div class="key-input-row">
+            <input id="m-key" value="${escHtml(c.privateKey||'')}" placeholder="C:\\Users\\you\\.ssh\\id_rsa" />
+            <button class="btn" type="button" onclick="browseKeyFile()">Browse...</button>
           </div>
-        </div>
         </div>
         <div class="form-row">
           <div class="form-group">
