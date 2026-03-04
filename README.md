@@ -1,6 +1,6 @@
 # AOSSH
 
-A cross-platform SSH & SFTP client built with Electron.
+A SSH & SFTP client built with Electron. Tested on Windows.
 
 ## Features
 
