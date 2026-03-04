@@ -23,6 +23,7 @@ function render() {
     <div class="titlebar">
       <div class="titlebar-logo"><div class="dot">⚡</div><span>AOSSH</span></div>
       <div class="tabs" id="tabs-container"></div>
+      <div class="drag-zone"></div>
       <div class="titlebar-tools">
         <button class="tools-btn" onclick="toggleToolsMenu(event)" title="Tools">⚙</button>
         <div class="tools-menu" id="tools-menu" style="display:none">
