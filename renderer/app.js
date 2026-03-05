@@ -16,6 +16,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (m) m.style.display = 'none';
   });
   render();
+
+  window.api.checkUpdate().then(r => {
+    if (r?.hasUpdate) showUpdateModal(r.currentVersion, r.latestVersion, r.url);
+  }).catch(() => {});
 });
 
 function render() {
@@ -62,6 +66,33 @@ function render() {
   renderSidebar('');
   renderTabs();
   renderPane();
+}
+
+// ── Update Modal ──────────────────────────────────────────────────────────────
+function showUpdateModal(current, latest, url) {
+  window._updateUrl = url;
+  const mc = document.getElementById('modal-container');
+  mc.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="width:360px" onclick="event.stopPropagation()">
+        <h2>Update Available <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
+        <p style="color:#8b949e;font-size:13px;margin:0 0 8px">A new version of AOSSH is available.</p>
+        <p style="font-size:13px;margin:0 0 20px">
+          Current: <span style="color:#8b949e">v${escHtml(current)}</span>
+          &nbsp;→&nbsp;
+          Latest: <span style="color:#3fb950;font-weight:600">v${escHtml(latest)}</span>
+        </p>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeModal()">Later</button>
+          <button class="btn primary" onclick="openUpdatePage()">⬇ Download</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function openUpdatePage() {
+  if (window._updateUrl) window.api.openExternal(window._updateUrl);
+  closeModal();
 }
 
 // ── Tools Menu ────────────────────────────────────────────────────────────────

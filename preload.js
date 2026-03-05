@@ -29,4 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.send('win:minimize'),
   maximize: () => ipcRenderer.send('win:maximize'),
   close:    () => ipcRenderer.send('win:close'),
+
+  checkUpdate:  ()    => ipcRenderer.invoke('app:checkUpdate'),
+  openExternal: url   => ipcRenderer.invoke('app:openExternal', url),
 });

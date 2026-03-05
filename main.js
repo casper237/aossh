@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Client } = require('ssh2');
@@ -273,6 +273,44 @@ ipcMain.handle('config:import', async () => {
     return { ok: true, data };
   } catch(e) { return { error: 'Invalid file: ' + e.message }; }
 });
+
+// Check for updates via GitHub releases
+ipcMain.handle('app:checkUpdate', () => {
+  return new Promise((resolve) => {
+    const https = require('https');
+    const req = https.get({
+      hostname: 'api.github.com',
+      path: '/repos/casper237/aossh/releases/latest',
+      headers: { 'User-Agent': 'AOSSH' },
+    }, res => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const latestRaw = (json.tag_name || '').replace(/^v/, '');
+          const currentVersion = app.getVersion();
+          const hasUpdate = isNewerVersion(currentVersion, latestRaw);
+          resolve({ currentVersion, latestVersion: latestRaw, url: json.html_url || '', hasUpdate });
+        } catch { resolve({ hasUpdate: false }); }
+      });
+    });
+    req.on('error', () => resolve({ hasUpdate: false }));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ hasUpdate: false }); });
+  });
+});
+
+function isNewerVersion(current, latest) {
+  const parse = v => v.replace(/^v/, '').split('.').map(n => parseInt(n) || 0);
+  const a = parse(current), b = parse(latest);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((b[i] || 0) > (a[i] || 0)) return true;
+    if ((b[i] || 0) < (a[i] || 0)) return false;
+  }
+  return false;
+}
+
+ipcMain.handle('app:openExternal', (_, url) => shell.openExternal(url));
 
 // Window controls
 ipcMain.on('win:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());
