@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.0] - 2026-03-06
+### Added
+- Update check on startup: if a newer version is available on GitHub, a modal prompts to download it
+
 ## [1.1.0] - 2026-03-05
 ### Added
 - Import connections from MobaXterm (.mxtsessions)
