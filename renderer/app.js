@@ -37,7 +37,6 @@ function render() {
           <div class="ctx-section">Import</div>
           <div class="ctx-item" onclick="importConnections('merge')">AOSSH — merge</div>
           <div class="ctx-item" onclick="importConnections('replace')">AOSSH — replace all</div>
-          <div class="ctx-item" onclick="importFromMobaXterm()">MobaXterm</div>
         </div>
       </div>
       <div class="win-controls">
@@ -131,18 +130,6 @@ async function importConnections(mode) {
   if (mode === 'replace') showToast(`✅ Replaced with ${connections.length} connection(s)`);
 }
 
-async function importFromMobaXterm() {
-  document.getElementById('tools-menu').style.display = 'none';
-  const result = await window.api.importMobaXterm();
-  if (result?.cancelled) return;
-  if (result?.error) { showToast('❌ ' + result.error); return; }
-  const existingIds = new Set(connections.map(c => c.id));
-  const newConns = result.data.filter(c => !existingIds.has(c.id));
-  connections = [...connections, ...newConns];
-  await window.api.saveConnections(connections);
-  renderSidebar('');
-  showToast(`✅ Imported ${newConns.length} connection(s) from MobaXterm`);
-}
 
 function showToast(msg) {
   const t = document.createElement('div');
@@ -237,13 +224,13 @@ function showCtxMenu(e, group, subgroup) {
   e.preventDefault(); e.stopPropagation();
   const menu = document.getElementById('ctx-menu');
   menu.innerHTML = subgroup !== null ? `
-    <div class="ctx-item" onclick="renameGroup('${escHtml(group)}','${escHtml(subgroup)}')">✏ Rename</div>
-    <div class="ctx-item ctx-danger" onclick="deleteGroup('${escHtml(group)}','${escHtml(subgroup)}')">🗑 Delete</div>
+    <div class="ctx-item" onclick="renameGroup('${escHtml(group)}','${escHtml(subgroup)}')">✏️ Rename</div>
+    <div class="ctx-item ctx-danger" onclick="deleteGroup('${escHtml(group)}','${escHtml(subgroup)}')">🗑️ Delete</div>
   ` : `
     <div class="ctx-item" onclick="addSubgroup('${escHtml(group)}')">＋ Add subgroup</div>
     <div class="ctx-divider"></div>
-    <div class="ctx-item" onclick="renameGroup('${escHtml(group)}',null)">✏ Rename</div>
-    <div class="ctx-item ctx-danger" onclick="deleteGroup('${escHtml(group)}',null)">🗑 Delete</div>
+    <div class="ctx-item" onclick="renameGroup('${escHtml(group)}',null)">✏️ Rename</div>
+    <div class="ctx-item ctx-danger" onclick="deleteGroup('${escHtml(group)}',null)">🗑️ Delete</div>
   `;
   menu.style.display = 'block';
   menu.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
@@ -268,13 +255,13 @@ function showConnCtxMenu(e, connId) {
   menu.innerHTML = `
     <div class="ctx-item ctx-connect" onclick="selectConn(${connId});hideContextMenu()">⚡ Connect</div>
     <div class="ctx-divider"></div>
-    <div class="ctx-item" onclick="openModal(${connId});hideContextMenu()">✏ Edit</div>
+    <div class="ctx-item" onclick="openModal(${connId});hideContextMenu()">✏️ Edit</div>
     <div class="ctx-item ctx-has-sub" onmouseenter="showMoveSubmenu(event,${connId})">
       📂 Move to...
       <span class="ctx-arrow">▶</span>
     </div>
     <div class="ctx-divider"></div>
-    <div class="ctx-item ctx-danger" onclick="deleteConn(${connId});hideContextMenu()">🗑 Delete</div>
+    <div class="ctx-item ctx-danger" onclick="deleteConn(${connId});hideContextMenu()">🗑️ Delete</div>
   `;
 
   menu.style.display = 'block';
@@ -511,6 +498,7 @@ function renderPane() {
           <div class="welcome-dot">⚡</div>
           <div class="welcome-title">AOSSH</div>
           <div class="welcome-sub">SSH & SFTP Client</div>
+          <div class="welcome-version" id="welcome-version">v...</div>
         </div>
         <div class="welcome-manual">
           <div class="manual-section">
@@ -532,6 +520,10 @@ function renderPane() {
           </div>
         </div>
       </div>`;
+    window.api.getVersion().then(v => {
+      const el = document.getElementById('welcome-version');
+      if (el) el.textContent = 'v' + v;
+    });
     return;
   }
   if (tab.type === 'terminal') {
@@ -646,7 +638,7 @@ async function loadSftp(tab) {
         <div class="file-date">${escHtml(f.modified||'—')}</div>
         <div class="file-actions">
           ${f.type==='file'?`<button class="icon-btn" onclick="event.stopPropagation();downloadFile('${escHtml(fp)}')">⬇</button>`:''}
-          ${f.name!=='..'?`<button class="icon-btn del" onclick="event.stopPropagation();deleteFile('${escHtml(fp)}','${f.type}')">🗑</button>`:''}
+          ${f.name!=='..'?`<button class="icon-btn del" onclick="event.stopPropagation();deleteFile('${escHtml(fp)}','${f.type}')">🗑️</button>`:''}
         </div>
       </div>`;
     }).join('');

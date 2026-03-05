@@ -32,4 +32,5 @@ contextBridge.exposeInMainWorld('api', {
 
   checkUpdate:  ()    => ipcRenderer.invoke('app:checkUpdate'),
   openExternal: url   => ipcRenderer.invoke('app:openExternal', url),
+  getVersion:   ()    => ipcRenderer.invoke('app:getVersion'),
 });

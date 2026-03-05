@@ -9,6 +9,7 @@ body { font-family: 'Segoe UI', sans-serif; background:#0d1117; color:#e6edf3; h
 .welcome-dot { width:64px; height:64px; border-radius:16px; background:#1f6feb; display:flex; align-items:center; justify-content:center; font-size:32px; box-shadow:0 0 30px rgba(31,111,235,0.4); }
 .welcome-title { font-size:28px; font-weight:700; color:#e6edf3; letter-spacing:2px; }
 .welcome-sub { font-size:13px; color:#484f58; letter-spacing:1px; }
+.welcome-version { font-size:11px; color:#30363d; letter-spacing:1px; margin-top:2px; text-align:center; width:100%; }
 .welcome-manual { display:flex; gap:24px; flex-wrap:wrap; justify-content:center; }
 .manual-section { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:16px 20px; min-width:220px; }
 .manual-title { font-size:13px; font-weight:600; color:#8b949e; margin-bottom:10px; }

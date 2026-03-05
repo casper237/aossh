@@ -311,6 +311,7 @@ function isNewerVersion(current, latest) {
 }
 
 ipcMain.handle('app:openExternal', (_, url) => shell.openExternal(url));
+ipcMain.handle('app:getVersion', () => app.getVersion());
 
 // Window controls
 ipcMain.on('win:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());
