@@ -5,6 +5,7 @@ const { Client } = require('ssh2');
 const os = require('os');
 
 // Fix black screen on virtual machines and systems without GPU
+app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('in-process-gpu');
