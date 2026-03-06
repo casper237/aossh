@@ -59,7 +59,7 @@ body { font-family: 'Segoe UI', sans-serif; background:#0d1117; color:#e6edf3; h
 .toolbar-btn:hover { background:#21262d; border-color:#30363d; color:#e6edf3; }
 .toolbar-btn.active { background:#21262d; border-color:#30363d; color:#e6edf3; }
 .pane { flex:1; overflow:hidden; display:flex; flex-direction:column; }
-#terminal-container { flex:1; padding:8px 8px 0 8px; background:#0d1117; overflow:hidden; display:flex; flex-direction:column; }
+#terminal-container { flex:1; padding:8px 8px 8px 8px; background:#0d1117; overflow:hidden; display:flex; flex-direction:column; }
 #terminal-container .xterm { flex:1; }
 .terminal-footer { height:16px; background:#0d1117; flex-shrink:0; border-top: 1px solid #161b22; }
 .sftp-path { display:flex; align-items:center; gap:8px; padding:6px 12px; background:#161b22; border-bottom:1px solid #30363d; }
