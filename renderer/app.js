@@ -537,7 +537,12 @@ function renderPane() {
         <button class="icon-btn" onclick="sftpRefresh()">↻</button>
       </div>
       <div class="file-header"><span>Name</span><span>Size</span><span>Modified</span><span>Actions</span></div>
-      <div class="file-list" id="file-list"><div style="padding:20px;color:#484f58;text-align:center">Loading...</div></div>
+      <div class="file-list" id="file-list"
+        ondragover="event.preventDefault();this.classList.add('drag-over')"
+        ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drag-over')"
+        ondrop="sftpHandleDrop(event)">
+        <div style="padding:20px;color:#484f58;text-align:center">Loading...</div>
+      </div>
       <div class="sftp-status"><span id="sftp-count">—</span><span>Drop files here to upload</span></div>`;
     loadSftp(tab);
   }
@@ -632,13 +637,16 @@ async function loadSftp(tab) {
     if (count) count.textContent = `${files.length} items`;
     list.innerHTML = [{ name:'..', type:'dir', size:null, modified:'' }, ...files].map(f => {
       const fp = f.name==='..' ? parentPath(tab.sftpPath||'/') : joinPath(tab.sftpPath||'/', f.name);
-      return `<div class="file-row" onclick="handleFileClick('${escHtml(f.name)}','${f.type}','${escHtml(tab.sftpPath||'/')}')">
+      return `<div class="file-row"
+        data-path="${escHtml(fp)}" data-name="${escHtml(f.name)}" data-type="${f.type}"
+        onclick="handleFileClick('${escHtml(f.name)}','${f.type}','${escHtml(tab.sftpPath||'/')}')"
+        oncontextmenu="event.stopPropagation();sftpFileCtxMenu(event,this)">
         <div class="file-name">${f.type==='dir'?'📁':'📄'}<span>${escHtml(f.name)}</span></div>
         <div class="file-size">${f.size!=null?formatSize(f.size):'—'}</div>
         <div class="file-date">${escHtml(f.modified||'—')}</div>
         <div class="file-actions">
-          ${f.type==='file'?`<button class="icon-btn" onclick="event.stopPropagation();downloadFile('${escHtml(fp)}')">⬇</button>`:''}
-          ${f.name!=='..'?`<button class="icon-btn del" onclick="event.stopPropagation();deleteFile('${escHtml(fp)}','${f.type}')">🗑️</button>`:''}
+          ${f.type==='file'?`<button class="icon-btn" title="Download" onclick="event.stopPropagation();downloadFile('${escHtml(fp)}')">⬇</button>`:''}
+          ${f.name!=='..'?`<button class="icon-btn del" title="Delete" onclick="event.stopPropagation();deleteFile('${escHtml(fp)}','${f.type}')">🗑️</button>`:''}
         </div>
       </div>`;
     }).join('');
@@ -660,6 +668,14 @@ function handleFileClick(name, type, currentPath) {
 
 function navigateSftp(path) { const tab = tabs.find(t => t.id===activeTabId); if (tab) { tab.sftpPath=path; loadSftp(tab); } }
 async function downloadFile(p) { const tab = tabs.find(t => t.id===activeTabId); if (tab) await window.api.sftpGet({ id:String(tab.id), remotePath:p }); }
+async function downloadDir(p) {
+  const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+  showToast('⬇ Downloading folder...');
+  try {
+    const r = await window.api.sftpDownloadDir({ id:String(tab.id), remotePath:p });
+    if (!r?.cancelled) showToast('✅ Folder downloaded');
+  } catch(e) { showToast('❌ ' + e); }
+}
 async function deleteFile(p) {
   showConfirmModal('Delete', `Delete "${p}"?`, async () => {
     const tab = tabs.find(t => t.id===activeTabId);
@@ -668,9 +684,112 @@ async function deleteFile(p) {
     loadSftp(tab);
   });
 }
-async function sftpUpload() { const tab = tabs.find(t => t.id===activeTabId); if (!tab) return; const r = await window.api.sftpPut({ id:String(tab.id), remotePath:tab.sftpPath||'/' }); if (!r?.cancelled) loadSftp(tab); }
-async function sftpMkdir() { const name = prompt('New folder name:'); if (!name) return; const tab = tabs.find(t => t.id===activeTabId); if (!tab) return; await window.api.sftpMkdir({ id:String(tab.id), remotePath:joinPath(tab.sftpPath||'/', name) }); loadSftp(tab); }
+async function sftpUpload() {
+  const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+  const r = await window.api.sftpPut({ id:String(tab.id), remotePath:tab.sftpPath||'/' });
+  if (r?.cancelled) return;
+  if (r?.count > 1) showToast(`✅ Uploaded ${r.count} file(s)`);
+  loadSftp(tab);
+}
+function sftpMkdir() {
+  showInputModal('New Folder', 'Folder name', '', async name => {
+    if (!name) return;
+    const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+    try {
+      await window.api.sftpMkdir({ id:String(tab.id), remotePath:joinPath(tab.sftpPath||'/', name) });
+      loadSftp(tab);
+    } catch(e) { showToast('❌ ' + e); }
+  });
+}
 function sftpRefresh() { const tab = tabs.find(t => t.id===activeTabId); if (tab) loadSftp(tab); }
+
+async function sftpHandleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+  const files = [...e.dataTransfer.files];
+  if (!files.length) return;
+  const localPaths = files.map(f => f.path).filter(Boolean);
+  if (!localPaths.length) return;
+  showToast(`⬆ Uploading ${localPaths.length} file(s)...`);
+  try {
+    await window.api.sftpUploadFiles({ id:String(tab.id), remotePath:tab.sftpPath||'/', localPaths });
+    showToast(`✅ Uploaded ${localPaths.length} file(s)`);
+    loadSftp(tab);
+  } catch(e) { showToast('❌ Upload failed: ' + e); }
+}
+
+function sftpFileCtxMenu(e, row) {
+  e.preventDefault();
+  hideContextMenu();
+  const fp   = row.dataset.path;
+  const name = row.dataset.name;
+  const type = row.dataset.type;
+  window._sftpCtxFile = { fp, name, type };
+  const isFile   = type === 'file';
+  const isParent = name === '..';
+  const menu = document.getElementById('ctx-menu');
+  menu.innerHTML = `
+    ${isFile  ? `<div class="ctx-item" onclick="downloadFile(window._sftpCtxFile.fp);hideContextMenu()">⬇️ Download</div>` : ''}
+    ${!isFile && !isParent ? `<div class="ctx-item" onclick="downloadDir(window._sftpCtxFile.fp);hideContextMenu()">⬇️ Download folder</div>` : ''}
+    ${isFile ? `<div class="ctx-item" onclick="sftpEditFile(window._sftpCtxFile.fp);hideContextMenu()">✏️ Edit</div>` : ''}
+    ${!isParent ? `<div class="ctx-item" onclick="sftpRenameFile(window._sftpCtxFile.fp,window._sftpCtxFile.name);hideContextMenu()">📝 Rename</div>` : ''}
+    ${!isParent ? `<div class="ctx-divider"></div><div class="ctx-item ctx-danger" onclick="deleteFile(window._sftpCtxFile.fp,window._sftpCtxFile.type);hideContextMenu()">🗑️ Delete</div>` : ''}
+  `;
+  menu.style.display = 'block';
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
+  menu.style.top  = Math.min(e.clientY, window.innerHeight - 130) + 'px';
+}
+
+function sftpRenameFile(fp, currentName) {
+  showInputModal('Rename', 'New name', currentName, async newName => {
+    if (!newName || newName === currentName) return;
+    const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+    const newPath = fp.slice(0, fp.lastIndexOf('/') + 1) + newName;
+    try {
+      await window.api.sftpRename({ id:String(tab.id), oldPath:fp, newPath });
+      loadSftp(tab);
+    } catch(e) { showToast('❌ Rename failed: ' + e); }
+  });
+}
+
+async function sftpEditFile(fp) {
+  const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+  showToast('📄 Loading file...');
+  try {
+    const r = await window.api.sftpReadFile({ id:String(tab.id), remotePath:fp });
+    showFileEditModal(fp, r.content);
+  } catch(e) { showToast('❌ ' + e); }
+}
+
+function showFileEditModal(fp, content) {
+  window._editFilePath = fp;
+  const mc = document.getElementById('modal-container');
+  mc.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="width:720px;max-width:92vw" onclick="event.stopPropagation()">
+        <h2>Edit: ${escHtml(fp.split('/').pop())} <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
+        <textarea id="file-edit-content" class="file-editor">${escHtml(content)}</textarea>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeModal()">Cancel</button>
+          <button class="btn primary" onclick="sftpSaveEdit()">Save</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('file-edit-content')?.focus(), 50);
+}
+
+async function sftpSaveEdit() {
+  const fp      = window._editFilePath;
+  const content = document.getElementById('file-edit-content')?.value;
+  if (!fp || content === undefined) return;
+  const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
+  closeModal();
+  try {
+    await window.api.sftpWriteFile({ id:String(tab.id), remotePath:fp, content });
+    showToast('✅ File saved');
+  } catch(e) { showToast('❌ Save failed: ' + e); }
+}
 
 // ── Tab management ────────────────────────────────────────────────────────────
 function highlightConn(id) {

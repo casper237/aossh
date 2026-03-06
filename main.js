@@ -71,73 +71,147 @@ ipcMain.handle('ssh:disconnect', (_, { id }) => {
   sessions.delete(id);
 });
 
-// SFTP
-ipcMain.handle('sftp:list', (_, { id, remotePath }) => {
+// SFTP — shared subsystem per session
+function clearSftp(id) {
+  const s = sessions.get(id);
+  if (s) s.sftp = null;
+}
+
+function getSftp(id) {
   return new Promise((resolve, reject) => {
     const s = sessions.get(id);
     if (!s) return reject('Not connected');
+    if (s.sftp) return resolve(s.sftp);
     s.conn.sftp((err, sftp) => {
       if (err) return reject(err.message);
-      sftp.readdir(remotePath, (err, list) => {
-        if (err) return reject(err.message);
-        resolve(list.map(f => ({
-          name: f.filename,
-          type: f.attrs.isDirectory() ? 'dir' : 'file',
-          size: f.attrs.size,
-          modified: new Date(f.attrs.mtime * 1000).toLocaleString(),
-        })).sort((a, b) => {
-          if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        }));
-      });
+      s.sftp = sftp;
+      sftp.on('end',   () => clearSftp(id));
+      sftp.on('close', () => clearSftp(id));
+      sftp.on('error', () => clearSftp(id));
+      resolve(sftp);
     });
   });
-});
+}
+
+// Run fn(sftp), retry once with a fresh channel if it fails
+async function withSftp(id, fn) {
+  try {
+    return await fn(await getSftp(id));
+  } catch (err) {
+    clearSftp(id);
+    return fn(await getSftp(id));
+  }
+}
+
+ipcMain.handle('sftp:list', (_, { id, remotePath }) =>
+  withSftp(id, sftp => new Promise((resolve, reject) => {
+    sftp.readdir(remotePath, (err, list) => {
+      if (err) return reject(err.message);
+      resolve(list.map(f => ({
+        name: f.filename,
+        type: f.attrs.isDirectory() ? 'dir' : 'file',
+        size: f.attrs.size,
+        modified: new Date(f.attrs.mtime * 1000).toLocaleString(),
+      })).sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      }));
+    });
+  }))
+);
 
 ipcMain.handle('sftp:download', async (_, { id, remotePath }) => {
   const { filePath } = await dialog.showSaveDialog({ defaultPath: path.basename(remotePath) });
   if (!filePath) return { cancelled: true };
-  return new Promise((resolve, reject) => {
-    const s = sessions.get(id);
-    s.conn.sftp((err, sftp) => {
-      if (err) return reject(err.message);
-      sftp.fastGet(remotePath, filePath, err => err ? reject(err.message) : resolve({ ok: true }));
-    });
+  return withSftp(id, sftp => new Promise((resolve, reject) => {
+    sftp.fastGet(remotePath, filePath, err => err ? reject(err.message) : resolve({ ok: true }));
+  }));
+});
+
+ipcMain.handle('sftp:downloadDir', async (_, { id, remotePath }) => {
+  const { filePaths } = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+  if (!filePaths?.length) return { cancelled: true };
+  const localBase = path.join(filePaths[0], path.basename(remotePath));
+  return withSftp(id, async sftp => {
+    async function downloadRecursive(remPath, localPath) {
+      await fs.promises.mkdir(localPath, { recursive: true });
+      const list = await new Promise((resolve, reject) =>
+        sftp.readdir(remPath, (err, l) => err ? reject(err.message) : resolve(l))
+      );
+      for (const item of list) {
+        const rItem = remPath.replace(/\/$/, '') + '/' + item.filename;
+        const lItem = path.join(localPath, item.filename);
+        if (item.attrs.isDirectory()) {
+          await downloadRecursive(rItem, lItem);
+        } else {
+          await new Promise((resolve, reject) =>
+            sftp.fastGet(rItem, lItem, err => err ? reject(err.message) : resolve())
+          );
+        }
+      }
+    }
+    await downloadRecursive(remotePath, localBase);
+    return { ok: true };
   });
 });
 
 ipcMain.handle('sftp:upload', async (_, { id, remotePath }) => {
-  const { filePaths } = await dialog.showOpenDialog({ properties: ['openFile'] });
+  const { filePaths } = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] });
   if (!filePaths?.length) return { cancelled: true };
-  const localFile = filePaths[0];
-  const remoteFile = remotePath.replace(/\/$/, '') + '/' + path.basename(localFile);
-  return new Promise((resolve, reject) => {
-    const s = sessions.get(id);
-    s.conn.sftp((err, sftp) => {
-      if (err) return reject(err.message);
-      sftp.fastPut(localFile, remoteFile, err => err ? reject(err.message) : resolve({ ok: true }));
-    });
-  });
+  const remote = remotePath.replace(/\/$/, '');
+  return withSftp(id, sftp => Promise.all(filePaths.map(localFile =>
+    new Promise((resolve, reject) => {
+      sftp.fastPut(localFile, remote + '/' + path.basename(localFile),
+        err => err ? reject(err.message) : resolve());
+    })
+  )).then(() => ({ ok: true, count: filePaths.length })));
 });
 
-ipcMain.handle('sftp:delete', (_, { id, remotePath }) => {
-  return new Promise((resolve, reject) => {
-    const s = sessions.get(id);
-    s.conn.sftp((err, sftp) => {
-      if (err) return reject(err.message);
-      sftp.unlink(remotePath, err => err ? reject(err.message) : resolve({ ok: true }));
-    });
-  });
-});
+ipcMain.handle('sftp:delete', (_, { id, remotePath }) =>
+  withSftp(id, sftp => new Promise((resolve, reject) => {
+    sftp.unlink(remotePath, err => err ? reject(err.message) : resolve({ ok: true }));
+  }))
+);
 
-ipcMain.handle('sftp:mkdir', (_, { id, remotePath }) => {
-  return new Promise((resolve, reject) => {
-    const s = sessions.get(id);
-    s.conn.sftp((err, sftp) => {
-      if (err) return reject(err.message);
-      sftp.mkdir(remotePath, err => err ? reject(err.message) : resolve({ ok: true }));
-    });
-  });
+ipcMain.handle('sftp:mkdir', (_, { id, remotePath }) =>
+  withSftp(id, sftp => new Promise((resolve, reject) => {
+    sftp.mkdir(remotePath, err => err ? reject(err.message) : resolve({ ok: true }));
+  }))
+);
+
+ipcMain.handle('sftp:rename', (_, { id, oldPath, newPath }) =>
+  withSftp(id, sftp => new Promise((resolve, reject) => {
+    sftp.rename(oldPath, newPath, err => err ? reject(err.message) : resolve({ ok: true }));
+  }))
+);
+
+ipcMain.handle('sftp:readFile', (_, { id, remotePath }) =>
+  withSftp(id, sftp => new Promise((resolve, reject) => {
+    const chunks = [];
+    const stream = sftp.createReadStream(remotePath);
+    stream.on('data', chunk => chunks.push(chunk));
+    stream.on('end', () => resolve({ content: Buffer.concat(chunks).toString('utf8') }));
+    stream.on('error', err => reject(err.message));
+  }))
+);
+
+ipcMain.handle('sftp:writeFile', (_, { id, remotePath, content }) =>
+  withSftp(id, sftp => new Promise((resolve, reject) => {
+    const stream = sftp.createWriteStream(remotePath);
+    stream.on('close', () => resolve({ ok: true }));
+    stream.on('error', err => reject(err.message));
+    stream.end(content);
+  }))
+);
+
+ipcMain.handle('sftp:uploadFiles', (_, { id, remotePath, localPaths }) => {
+  const remote = remotePath.replace(/\/$/, '');
+  return withSftp(id, sftp => Promise.all(localPaths.map(localFile =>
+    new Promise((resolve, reject) => {
+      sftp.fastPut(localFile, remote + '/' + path.basename(localFile),
+        err => err ? reject(err.message) : resolve());
+    })
+  )).then(() => ({ ok: true, count: localPaths.length })));
 });
 
 // Clipboard
