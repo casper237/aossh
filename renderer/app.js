@@ -17,9 +17,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
   render();
 
-  window.api.checkUpdate().then(r => {
-    if (r?.hasUpdate) showUpdateModal(r.currentVersion, r.latestVersion, r.url);
-  }).catch(() => {});
+  setTimeout(() => {
+    window.api.checkUpdate().then(r => {
+      if (r?.hasUpdate) showUpdateModal(r.currentVersion, r.latestVersion, r.url);
+    }).catch(() => {});
+  }, 5000);
 });
 
 function render() {
