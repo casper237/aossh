@@ -582,7 +582,13 @@ function initTerminal(tab) {
       window.api.onClosed(String(tab.id), () => { term.writeln('\x1b[1;31m\r\nConnection closed.\x1b[0m'); conn.status='offline'; renderSidebar(''); });
       term.onData(d => window.api.write({ id:String(tab.id), data:d }));
 
-      // Ctrl+V paste from clipboard
+      // Block native paste event so xterm doesn't double-send (we handle via attachCustomKeyEventHandler)
+      container.addEventListener('paste', e => {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }, true);
+
+      // Ctrl+V paste, Ctrl+C copy
       term.attachCustomKeyEventHandler(e => {
         if (e.ctrlKey && e.key === 'v' && e.type === 'keydown') {
           window.api.clipboardRead().then(text => {
@@ -590,7 +596,6 @@ function initTerminal(tab) {
           });
           return false;
         }
-        // Ctrl+C copy selected text
         if (e.ctrlKey && e.key === 'c' && e.type === 'keydown' && term.hasSelection()) {
           window.api.clipboardWrite(term.getSelection());
           return false;
