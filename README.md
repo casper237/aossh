@@ -12,6 +12,12 @@ A SSH & SFTP client built with Electron. Tested on Windows.
 - **Export / Import** — backup and restore your connections
 - **Multi-tab** — connect to multiple servers at once
 
+## Installation
+
+Download the latest installer from [Releases](https://github.com/casper237/aossh/releases).
+
+> **Windows SmartScreen warning:** When running the installer you may see "Windows protected your PC". This happens because the app is not yet code-signed. Click **More info** → **Run anyway** to proceed.
+
 ## Getting Started
 
 ### Requirements
