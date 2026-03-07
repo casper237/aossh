@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.3.3] - 2026-03-07
+### Added
+- AI browser panel with built-in tabs (ChatGPT, Claude, Gemini, Grok, DeepSeek)
+- Cancel upload button (✕) in SFTP status bar
+- Remember expanded/collapsed state of groups and subgroups between sessions
+
+### Fixed
+- SFTP upload failure (SSH_FX_FAILURE): smart concurrency fallback — tries max speed (64 concurrent) first, retries at lower concurrency on server error
+- SFTP folder delete from context menu now works (recursive rm)
+
+## [1.3.2] - 2026-03-07
+### Fixed
+- Ctrl+V double paste on virtual machines, restored paste for non-Latin keyboard layouts
+- Terminal bottom padding: last line no longer hidden behind border
+- Slow startup: bundle xterm.js locally, defer update check
+- Black screen on virtual machines and Windows Server (GPU fallback)
+
+## [1.3.0] - 2026-03-06
+### Added
+- Drag & drop file upload into SFTP panel
+- Right-click context menu on files/folders (download, edit, rename, delete)
+- Edit text files inline with built-in editor
+- Download folder recursively
+- Multiple file upload via dialog
+
+### Fixed
+- Reuse SFTP channel per session (fixes "Channel open failure")
+- Auto-retry SFTP operations on stale channel (fixes periodic errors)
+- New folder dialog uses custom modal instead of browser prompt
+
+## [1.2.1] - 2026-03-06
+### Added
+- App version shown on welcome screen
+
+### Fixed
+- Emoji rendering in context menus (pencil, trash icons)
+- Removed MobaXterm import (passwords not exported by MobaXterm)
+
 ## [1.2.0] - 2026-03-06
 ### Added
 - Update check on startup: if a newer version is available on GitHub, a modal prompts to download it
