@@ -1,6 +1,6 @@
 {
   "name": "aossh",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "AOS SSH & SFTP Client",
   "main": "main.js",
   "scripts": {

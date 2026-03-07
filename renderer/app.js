@@ -4,7 +4,21 @@ let tabs = [];
 let activeTabId = null;
 let terminals = {};
 let selectedConnId = null;
-let collapsedGroups = {};
+const sftpProgressListeners = new Set();
+let collapsedGroups = JSON.parse(localStorage.getItem('collapsedGroups') || '{}');
+let aiPanelOpen = false;
+let aiPanelWidth = 420;
+let aiTabs = [];
+let activeAiTabId = null;
+let nextAiTabId = 1;
+
+const AI_PRESETS = [
+  { name: 'Claude',      url: 'https://claude.ai' },
+  { name: 'ChatGPT',     url: 'https://chatgpt.com' },
+  { name: 'Gemini',      url: 'https://gemini.google.com' },
+  { name: 'Grok',        url: 'https://grok.com' },
+  { name: 'Perplexity',  url: 'https://perplexity.ai' },
+];
 
 window.addEventListener('DOMContentLoaded', async () => {
   connections = await window.api.loadConnections();
@@ -25,13 +39,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function render() {
-  document.getElementById('root').innerHTML = `
+  document.getElementById('titlebar-host').innerHTML = `
     <div class="titlebar">
       <div class="titlebar-logo"><div class="dot">⚡</div><span>AOSSH</span></div>
       <div class="tabs" id="tabs-container"></div>
       <div class="drag-zone"></div>
       <div class="titlebar-tools">
-        <button class="tools-btn" onclick="toggleToolsMenu(event)" title="Tools">⚙</button>
+        <button class="tools-btn" id="ai-toggle-btn" onclick="toggleAiPanel()" title="AI Assistant">🤖</button>
+        <button class="tools-btn" id="tools-menu-btn" onclick="toggleToolsMenu(event)" title="Tools">⚙️</button>
         <div class="tools-menu" id="tools-menu" style="display:none">
           <div class="ctx-section">Connections</div>
           <div class="ctx-item" onclick="exportConnections()">Export...</div>
@@ -42,31 +57,172 @@ function render() {
         </div>
       </div>
       <div class="win-controls">
-        <button class="win-btn" onclick="window.api.minimize()">─</button>
-        <button class="win-btn" onclick="window.api.maximize()">□</button>
-        <button class="win-btn close-btn" onclick="window.api.close()">✕</button>
+        <button class="win-btn win-minimize" onclick="window.api.minimize()" title="Minimize"></button>
+        <button class="win-btn win-maximize" onclick="window.api.maximize()" title="Maximize"></button>
+        <button class="win-btn win-close" onclick="window.api.close()" title="Close"></button>
       </div>
+    </div>`;
+
+  document.getElementById('root').innerHTML = `
+    <div class="sidebar">
+      <div class="sidebar-top">
+        <input class="search" placeholder="🔍 Search..." oninput="renderSidebar(this.value)" />
+        <button class="btn primary" onclick="openModal()">＋ New Connection</button>
+      </div>
+      <div class="conn-list" id="conn-list"></div>
+      <div class="sidebar-footer" id="sidebar-footer"></div>
     </div>
-    <div class="layout">
-      <div class="sidebar">
-        <div class="sidebar-top">
-          <input class="search" placeholder="🔍 Search..." oninput="renderSidebar(this.value)" />
-          <button class="btn primary" onclick="openModal()">＋ New Connection</button>
-        </div>
-        <div class="conn-list" id="conn-list"></div>
-        <div class="sidebar-footer" id="sidebar-footer"></div>
-      </div>
-      <div class="content">
-        <div class="toolbar" id="toolbar"></div>
-        <div class="pane" id="pane"></div>
-      </div>
-    </div>
-    <div id="modal-container"></div>
-    <div id="ctx-menu" class="ctx-menu" style="display:none"></div>
-  `;
+    <div class="content">
+      <div class="toolbar" id="toolbar"></div>
+      <div class="pane" id="pane"></div>
+    </div>`;
+
   renderSidebar('');
   renderTabs();
   renderPane();
+  syncAiPanelButton();
+}
+
+// ── AI Panel ──────────────────────────────────────────────────────────────────
+function syncAiPanelButton() {
+  const btn = document.getElementById('ai-toggle-btn');
+  if (btn) btn.classList.toggle('active', aiPanelOpen);
+}
+
+function toggleAiPanel() {
+  aiPanelOpen = !aiPanelOpen;
+  const panel  = document.getElementById('ai-panel');
+  const handle = document.getElementById('ai-resize-handle');
+  if (aiPanelOpen) {
+    panel.classList.add('visible');
+    panel.style.width = aiPanelWidth + 'px';
+    handle.classList.add('visible');
+    if (aiTabs.length === 0) addAiTab('https://claude.ai');
+    else renderAiHeader();
+    initAiPanelResize();
+  } else {
+    panel.classList.remove('visible');
+    handle.classList.remove('visible');
+  }
+  syncAiPanelButton();
+}
+
+function renderAiHeader() {
+  const header = document.getElementById('ai-panel-header');
+  if (!header) return;
+  const active = aiTabs.find(t => t.id === activeAiTabId);
+  header.innerHTML = `
+    <div class="ai-tabs-bar">
+      ${aiTabs.map(t => `
+        <div class="ai-tab ${t.id === activeAiTabId ? 'active' : ''}" onclick="switchAiTab(${t.id})">
+          <span class="ai-tab-title">${escHtml(t.title || 'New Tab')}</span>
+          <span class="ai-tab-close" onclick="event.stopPropagation();closeAiTab(${t.id})">✕</span>
+        </div>`).join('')}
+      <button class="ai-new-tab-btn" onclick="addAiTab('https://www.google.com')" title="New tab">＋</button>
+    </div>
+    <div class="ai-nav-bar">
+      ${AI_PRESETS.map(p => `<button class="ai-preset-btn" onclick="navigateAi('${p.url}')">${escHtml(p.name)}</button>`).join('')}
+      <input id="ai-url-input" class="ai-url-input" type="text"
+        value="${escHtml(active?.url || '')}"
+        placeholder="https://www.google.com"
+        onkeydown="if(event.key==='Enter'){navigateAi(this.value);this.blur()}" />
+    </div>`;
+}
+
+function addAiTab(url) {
+  const id = nextAiTabId++;
+  aiTabs.push({ id, url, title: 'Loading...' });
+  activeAiTabId = id;
+
+  const wv = document.createElement('webview');
+  wv.id = `ai-wv-${id}`;
+  wv.src = url;
+  wv.setAttribute('partition', 'persist:ai');
+  wv.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+  wv.setAttribute('allowpopups', '');
+  wv.style.cssText = '';
+
+  document.querySelectorAll('#ai-webviews webview').forEach(w => w.classList.remove('active'));
+  document.getElementById('ai-webviews').appendChild(wv);
+  wv.classList.add('active');
+
+  wv.addEventListener('did-fail-load', e => {
+    if (e.errorCode === -3) return; // ERR_ABORTED = redirect, ignore
+  });
+  wv.addEventListener('page-title-updated', e => {
+    const tab = aiTabs.find(t => t.id === id);
+    if (tab) { tab.title = e.title; renderAiHeader(); }
+  });
+  wv.addEventListener('did-navigate', e => {
+    const tab = aiTabs.find(t => t.id === id);
+    if (tab) tab.url = e.url;
+    if (activeAiTabId === id) {
+      const inp = document.getElementById('ai-url-input');
+      if (inp) inp.value = e.url;
+    }
+  });
+  renderAiHeader();
+}
+
+function switchAiTab(id) {
+  activeAiTabId = id;
+  document.querySelectorAll('#ai-webviews webview').forEach(wv => {
+    wv.classList.toggle('active', wv.id === `ai-wv-${id}`);
+  });
+  renderAiHeader();
+}
+
+function closeAiTab(id) {
+  const idx = aiTabs.findIndex(t => t.id === id);
+  if (idx === -1) return;
+  aiTabs.splice(idx, 1);
+  document.getElementById(`ai-wv-${id}`)?.remove();
+  if (aiTabs.length === 0) { toggleAiPanel(); return; }
+  if (activeAiTabId === id) switchAiTab(aiTabs[Math.min(idx, aiTabs.length - 1)].id);
+  else renderAiHeader();
+}
+
+function navigateAi(url) {
+  if (!url.match(/^https?:\/\//)) url = 'https://' + url;
+  const wv = document.getElementById(`ai-wv-${activeAiTabId}`);
+  if (wv) wv.src = url;
+  const tab = aiTabs.find(t => t.id === activeAiTabId);
+  if (tab) tab.url = url;
+  const inp = document.getElementById('ai-url-input');
+  if (inp) inp.value = url;
+}
+
+function initAiPanelResize() {
+  const handle = document.getElementById('ai-resize-handle');
+  if (!handle || handle._init) return;
+  handle._init = true;
+  let startX, startWidth;
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault();
+    startX = e.clientX;
+    startWidth = document.getElementById('ai-panel').offsetWidth;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    // Cover webviews so they don't swallow mouse events during drag
+    const overlay = document.createElement('div');
+    overlay.id = 'drag-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;cursor:col-resize;';
+    document.body.appendChild(overlay);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+  function onMove(e) {
+    const w = Math.max(280, Math.min(900, startWidth - (e.clientX - startX)));
+    aiPanelWidth = w;
+    document.getElementById('ai-panel').style.width = w + 'px';
+  }
+  function onUp() {
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    document.getElementById('drag-overlay')?.remove();
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
 }
 
 // ── Update Modal ──────────────────────────────────────────────────────────────
@@ -145,6 +301,7 @@ function showToast(msg) {
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function toggleGroup(key) {
   collapsedGroups[key] = !collapsedGroups[key];
+  localStorage.setItem('collapsedGroups', JSON.stringify(collapsedGroups));
   renderSidebar(document.querySelector('.search')?.value || '');
 }
 
@@ -482,10 +639,10 @@ function renderToolbar() {
     <button class="toolbar-btn ${tab.type==='sftp'?'active':''}" onclick="switchTabType('sftp')">📁 SFTP</button>
     <div style="flex:1"></div>
     ${tab.type==='sftp'?`
-      <button class="toolbar-btn" onclick="sftpUpload()">⬆ Upload</button>
-      <button class="toolbar-btn" onclick="sftpMkdir()">📁＋ New Folder</button>
-      <button class="toolbar-btn" onclick="sftpRefresh()">↻ Refresh</button>`:''}
-    <button class="toolbar-btn" onclick="disconnectTab()" style="color:#f85149">✕ Disconnect</button>`;
+      <button class="toolbar-btn" onclick="sftpUpload()">📤 Upload</button>
+      <button class="toolbar-btn" onclick="sftpMkdir()">📁 New Folder</button>
+      <button class="toolbar-btn" onclick="sftpRefresh()">🔄 Refresh</button>`:''}
+    <button class="toolbar-btn" onclick="disconnectTab()" style="color:#f85149">🔌 Disconnect</button>`;
 }
 
 function renderPane() {
@@ -545,7 +702,10 @@ function renderPane() {
         ondrop="sftpHandleDrop(event)">
         <div style="padding:20px;color:#484f58;text-align:center">Loading...</div>
       </div>
-      <div class="sftp-status"><span id="sftp-count">—</span><span>Drop files here to upload</span></div>`;
+      <div class="sftp-status">
+        <div id="sftp-status-default"><span id="sftp-count">—</span><span>Drop files here to upload</span></div>
+        <div id="sftp-progress-bar" class="sftp-progress-bar" style="display:none"></div>
+      </div>`;
     loadSftp(tab);
   }
 }
@@ -623,7 +783,34 @@ function initTerminal(tab) {
 }
 
 // ── SFTP ──────────────────────────────────────────────────────────────────────
+function updateSftpProgress(data) {
+  const bar = document.getElementById('sftp-progress-bar');
+  const status = document.getElementById('sftp-status-default');
+  if (!bar || !status) return;
+  if (!data) {
+    bar.style.display = 'none';
+    status.style.display = '';
+    return;
+  }
+  status.style.display = 'none';
+  bar.style.display = 'flex';
+  const pct = data.total ? Math.round((data.transferred / data.total) * 100) : null;
+  const tab = tabs.find(t => t.id === activeTabId);
+  bar.innerHTML = `<span class="sftp-progress-name">${escHtml(data.name)}</span><div class="sftp-progress-track"><div class="sftp-progress-fill" style="width:${pct ?? 50}%"></div></div><span class="sftp-progress-pct">${pct !== null ? pct + '%' : '...'}</span><button class="sftp-cancel-btn" title="Cancel" onclick="cancelUpload()">✕</button>`;
+}
+
+async function cancelUpload() {
+  const tab = tabs.find(t => t.id === activeTabId);
+  if (!tab) return;
+  await window.api.sftpCancelUpload({ id: String(tab.id) });
+  updateSftpProgress(null);
+}
+
 async function loadSftp(tab) {
+  if (!sftpProgressListeners.has(tab.id)) {
+    sftpProgressListeners.add(tab.id);
+    window.api.onSftpProgress(String(tab.id), data => updateSftpProgress(data));
+  }
   if (!terminals[tab.id]) {
     const conn = connections.find(c => c.id === tab.connId);
     if (!conn) return;
@@ -646,7 +833,7 @@ async function loadSftp(tab) {
       const fp = f.name==='..' ? parentPath(tab.sftpPath||'/') : joinPath(tab.sftpPath||'/', f.name);
       return `<div class="file-row"
         data-path="${escHtml(fp)}" data-name="${escHtml(f.name)}" data-type="${f.type}"
-        onclick="handleFileClick('${escHtml(f.name)}','${f.type}','${escHtml(tab.sftpPath||'/')}')"
+        ondblclick="handleFileClick('${escHtml(f.name)}','${f.type}','${escHtml(tab.sftpPath||'/')}')"
         oncontextmenu="event.stopPropagation();sftpFileCtxMenu(event,this)">
         <div class="file-name">${f.type==='dir'?'📁':'📄'}<span>${escHtml(f.name)}</span></div>
         <div class="file-size">${f.size!=null?formatSize(f.size):'—'}</div>
@@ -683,11 +870,12 @@ async function downloadDir(p) {
     if (!r?.cancelled) showToast('✅ Folder downloaded');
   } catch(e) { showToast('❌ ' + e); }
 }
-async function deleteFile(p) {
+async function deleteFile(p, type) {
   showConfirmModal('Delete', `Delete "${p}"?`, async () => {
     const tab = tabs.find(t => t.id===activeTabId);
     if (!tab) return;
-    await window.api.sftpDelete({ id:String(tab.id), remotePath:p });
+    if (type === 'dir') await window.api.sftpDeleteDir({ id:String(tab.id), remotePath:p });
+    else await window.api.sftpDelete({ id:String(tab.id), remotePath:p });
     loadSftp(tab);
   });
 }
