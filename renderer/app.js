@@ -686,7 +686,7 @@ function renderPane() {
           <div class="manual-section">
             <div class="manual-title">🤖 AI Panel</div>
             <div class="manual-item"><span class="manual-key">🤖 button</span> — open / close AI browser panel</div>
-            <div class="manual-item"><span class="manual-key">Tabs</span> — ChatGPT, Claude, Gemini, Grok, DeepSeek</div>
+            <div class="manual-item"><span class="manual-key">Tabs</span> — ChatGPT, Claude, Gemini, Grok, Perplexity</div>
             <div class="manual-item"><span class="manual-key">Sessions saved</span> — stay logged in between restarts</div>
           </div>
         </div>
