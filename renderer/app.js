@@ -677,6 +677,18 @@ function renderPane() {
             <div class="manual-item"><span class="manual-key">SFTP</span> — file manager, upload & download</div>
             <div class="manual-item"><span class="manual-key">Multiple tabs</span> — connect to several servers at once</div>
           </div>
+          <div class="manual-section">
+            <div class="manual-title">📂 SFTP</div>
+            <div class="manual-item"><span class="manual-key">Drag & drop</span> — upload files into the file list</div>
+            <div class="manual-item"><span class="manual-key">Right click file/folder</span> — download, edit, rename, delete</div>
+            <div class="manual-item"><span class="manual-key">✕ in status bar</span> — cancel active upload</div>
+          </div>
+          <div class="manual-section">
+            <div class="manual-title">🤖 AI Panel</div>
+            <div class="manual-item"><span class="manual-key">🤖 button</span> — open / close AI browser panel</div>
+            <div class="manual-item"><span class="manual-key">Tabs</span> — ChatGPT, Claude, Gemini, Grok, DeepSeek</div>
+            <div class="manual-item"><span class="manual-key">Sessions saved</span> — stay logged in between restarts</div>
+          </div>
         </div>
       </div>`;
     window.api.getVersion().then(v => {
