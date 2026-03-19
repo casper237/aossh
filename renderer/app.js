@@ -3,6 +3,7 @@ let connections = [];
 let tabs = [];
 let activeTabId = null;
 let terminals = {};
+let terminalPasteHandlersRegistered = false;
 let selectedConnId = null;
 const sftpProgressListeners = new Set();
 let collapsedGroups = JSON.parse(localStorage.getItem('collapsedGroups') || '{}');
@@ -24,10 +25,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   connections = await window.api.loadConnections();
   // Reset all statuses to offline on startup
   connections = connections.map(c => ({ ...c, status: 'offline' }));
-  document.addEventListener('click', () => {
+  document.addEventListener('click', e => {
+    // Ignore right/middle clicks — on some Electron/Windows builds contextmenu
+    // also fires a click event, which would immediately close the menu we just opened
+    if (e.button !== 0) return;
+    // Don't close context menu when clicking inside it (let its own onclick handle it)
+    if (document.getElementById('ctx-menu')?.contains(e.target)) return;
     hideContextMenu();
     const m = document.getElementById('tools-menu');
-    if (m) m.style.display = 'none';
+    if (m && !m.contains(e.target)) m.style.display = 'none';
   });
   render();
 
@@ -754,36 +760,63 @@ function initTerminal(tab) {
       window.api.onClosed(String(tab.id), () => { term.writeln('\x1b[1;31m\r\nConnection closed.\x1b[0m'); conn.status='offline'; renderSidebar(''); });
       term.onData(d => window.api.write({ id:String(tab.id), data:d }));
 
-      // Block native paste event so xterm doesn't double-send (we handle via attachCustomKeyEventHandler)
-      container.addEventListener('paste', e => {
-        e.stopImmediatePropagation();
-        e.preventDefault();
-      }, true);
+      // Paste text respecting bracketed paste mode (fixes YAML/indentation corruption)
+      const pasteToTerminal = text => {
+        if (!text) return;
+        const bracketed = terminals[tab.id]?.term?.modes?.bracketedPasteMode;
+        const data = bracketed ? '\x1b[200~' + text + '\x1b[201~' : text;
+        window.api.write({ id: String(tab.id), data });
+      };
 
-      // Ctrl+V paste, Ctrl+C copy
+      // Ctrl+V paste, Ctrl+C copy, Shift+Insert paste (for Windows Server VMs)
       term.attachCustomKeyEventHandler(e => {
-        if (e.ctrlKey && e.key === 'v' && e.type === 'keydown') {
-          window.api.clipboardRead().then(text => {
-            if (text) window.api.write({ id:String(tab.id), data:text });
-          });
+        if (e.type !== 'keydown') return true;
+        if ((e.ctrlKey && e.code === 'KeyV') || (e.code === 'Insert' && e.shiftKey)) {
+          window.api.clipboardRead().then(pasteToTerminal);
           return false;
         }
-        if (e.ctrlKey && e.key === 'c' && e.type === 'keydown' && term.hasSelection()) {
+        if (e.ctrlKey && e.code === 'KeyC' && term.hasSelection()) {
           window.api.clipboardWrite(term.getSelection());
           return false;
         }
         return true;
       });
 
-      // Right-click paste
-      container.addEventListener('contextmenu', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        const tabId = String(tab.id);
-        window.api.clipboardRead().then(text => {
-          if (text) window.api.write({ id: tabId, data: text });
-        });
-      }, true);
+      // Auto-copy on mouse selection
+      term.onSelectionChange(() => {
+        const sel = term.getSelection();
+        if (sel) window.api.clipboardWrite(sel);
+      });
+
+      // Register window-level paste/contextmenu handlers once (shared across all tabs).
+      // Window-level capture fires before xterm's own document/window listeners,
+      // preventing double-paste on Ctrl+V and enabling right-click paste.
+      if (!terminalPasteHandlersRegistered) {
+        terminalPasteHandlersRegistered = true;
+
+        // Block paste events so xterm never processes them (our Ctrl+V handler does it)
+        window.addEventListener('paste', e => {
+          const tc = document.getElementById('terminal-container');
+          if (tc && tc.contains(e.target)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+
+        // Right-click → paste clipboard into active terminal
+        window.addEventListener('contextmenu', e => {
+          const tc = document.getElementById('terminal-container');
+          if (!tc || !tc.contains(e.target)) return;
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          const tid = activeTabId;
+          const bracketed = terminals[tid]?.term?.modes?.bracketedPasteMode;
+          window.api.clipboardRead().then(text => {
+            if (!text) return;
+            window.api.write({ id: String(tid), data: bracketed ? '\x1b[200~' + text + '\x1b[201~' : text });
+          });
+        }, true);
+      }
 
       new ResizeObserver(() => {
         fitAddon.fit();
@@ -1031,7 +1064,7 @@ function disconnectTab() { const tab=tabs.find(t=>t.id===activeTabId); if (tab) 
 
 // ── Connection Modal ──────────────────────────────────────────────────────────
 function openModal(editId=null, prefillGroup=null, prefillSub=null) {
-  const c = editId ? connections.find(c=>c.id===editId) : {};
+  const c = (editId ? connections.find(c=>c.id===editId) : null) ?? {};
   const allGroups = [...new Set(connections.map(c=>c.group||'Default'))];
   if (!allGroups.length) allGroups.push('Default');
   const curGroup = c.group || prefillGroup || allGroups[0];

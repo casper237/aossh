@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4] - 2026-03-19
+### Fixed
+- Ctrl+V no longer doubles input in terminal (window-level paste capture)
+- Right-click paste now works reliably across multiple tabs
+- Ctrl+C / Ctrl+V work on any keyboard layout (e.g. Russian, Ukrainian)
+- Mouse selection in terminal auto-copies to clipboard
+
 ## [1.3.3] - 2026-03-07
 ### Added
 - AI browser panel with built-in tabs (ChatGPT, Claude, Gemini, Grok, DeepSeek)
