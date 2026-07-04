@@ -236,7 +236,7 @@ function showUpdateModal(current, latest, url) {
   window._updateUrl = url;
   const mc = document.getElementById('modal-container');
   mc.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal-overlay" onmousedown="overlayDown(event)" onclick="overlayClick(event)">
       <div class="modal" style="width:360px" onclick="event.stopPropagation()">
         <h2>Update Available <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
         <p style="color:#8b949e;font-size:13px;margin:0 0 8px">A new version of AOSSH is available.</p>
@@ -557,7 +557,7 @@ function renameGroup(group, subgroup) {
 function showConfirmModal(title, message, onConfirm) {
   const mc = document.getElementById('modal-container');
   mc.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal-overlay" onmousedown="overlayDown(event)" onclick="overlayClick(event)">
       <div class="modal" style="width:320px" onclick="event.stopPropagation()">
         <h2>${escHtml(title)} <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
         <p style="color:#8b949e;font-size:13px;margin-bottom:20px">${escHtml(message)}</p>
@@ -579,7 +579,7 @@ function confirmModal() {
 function showInputModal(title, label, defaultVal, onConfirm) {
   const mc = document.getElementById('modal-container');
   mc.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal-overlay" onmousedown="overlayDown(event)" onclick="overlayClick(event)">
       <div class="modal" style="width:320px" onclick="event.stopPropagation()">
         <h2>${escHtml(title)} <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
         <div class="form-group">
@@ -1006,7 +1006,7 @@ function showFileEditModal(fp, content) {
   window._editFilePath = fp;
   const mc = document.getElementById('modal-container');
   mc.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal-overlay" onmousedown="overlayDown(event)" onclick="overlayClick(event)">
       <div class="modal" style="width:720px;max-width:92vw" onclick="event.stopPropagation()">
         <h2>Edit: ${escHtml(fp.split('/').pop())} <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
         <textarea id="file-edit-content" class="file-editor">${escHtml(content)}</textarea>
@@ -1072,7 +1072,7 @@ function openModal(editId=null, prefillGroup=null, prefillSub=null) {
   const curSub = c.subgroup || prefillSub || '';
 
   document.getElementById('modal-container').innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal-overlay" onmousedown="overlayDown(event)" onclick="overlayClick(event)">
       <div class="modal" onclick="event.stopPropagation()">
         <h2>${editId?'Edit':'New'} Connection <span class="icon-btn" onclick="closeModal()" style="font-size:18px">✕</span></h2>
         <div class="form-group"><label>Name</label><input id="m-name" value="${escHtml(c.name||'')}" placeholder="My Server" /></div>
@@ -1163,6 +1163,10 @@ function toggleAuth(v) {
 }
 
 function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+// Overlay helpers: only close if mousedown also started on the overlay itself,
+// preventing accidental close when mouseup lands on overlay after clicking a button that disappeared.
+function overlayDown(e)  { e.currentTarget.dataset.down = (e.target === e.currentTarget ? '1' : ''); }
+function overlayClick(e) { if (e.button === 0 && e.target === e.currentTarget && e.currentTarget.dataset.down) closeModal(); }
 
 async function saveConn(editId) {
   const name = document.getElementById('m-name').value.trim();
