@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Client } = require('ssh2');
 const os = require('os');
+const crypto = require('crypto');
 
 // Fix black screen on virtual machines and systems without GPU
 app.disableHardwareAcceleration();
@@ -11,6 +12,68 @@ app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('in-process-gpu');
 
 const sessions = new Map();
+
+// ── Secret encryption at rest ───────────────────────────────────────────────────
+// Two schemes:
+//   enc:v1:  Windows DPAPI via Electron safeStorage (user-account bound; default).
+//   enc:v2:  master-password vault — scrypt-derived key + AES-256-GCM (opt-in).
+// When the vault is enabled and unlocked, secrets are written as v2; otherwise v1.
+const ENC_PREFIX   = 'enc:v1:';
+const VAULT_PREFIX = 'enc:v2:';
+const SCRYPT = { N: 1 << 15, r: 8, p: 1, keyLen: 32, maxmem: 64 * 1024 * 1024 };
+
+let vaultEnabled = false;   // mirrors vault.json { enabled }
+let vaultKey = null;        // derived key Buffer, held only while unlocked
+
+function vaultFile() { return path.join(app.getPath('userData'), 'vault.json'); }
+function loadVaultMeta() { try { return JSON.parse(fs.readFileSync(vaultFile(), 'utf8')); } catch { return null; } }
+function saveVaultMeta(m) { fs.writeFileSync(vaultFile(), JSON.stringify(m, null, 2)); }
+
+function deriveKey(password, saltB64) {
+  return crypto.scryptSync(String(password), Buffer.from(saltB64, 'base64'), SCRYPT.keyLen,
+    { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p, maxmem: SCRYPT.maxmem });
+}
+function gcmEncrypt(key, plaintext) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ct]).toString('base64');
+}
+function gcmDecrypt(key, b64) {
+  const buf = Buffer.from(b64, 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, buf.subarray(0, 12));
+  decipher.setAuthTag(buf.subarray(12, 28));
+  return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8');
+}
+
+function isEncrypted(s) { return typeof s === 'string' && (s.startsWith(ENC_PREFIX) || s.startsWith(VAULT_PREFIX)); }
+
+function encryptSecret(s) {
+  if (!s || typeof s !== 'string' || isEncrypted(s)) return s;
+  if (vaultKey) return VAULT_PREFIX + gcmEncrypt(vaultKey, s);
+  try {
+    if (safeStorage.isEncryptionAvailable())
+      return ENC_PREFIX + safeStorage.encryptString(s).toString('base64');
+  } catch {}
+  return s;
+}
+function decryptSecret(s) {
+  if (typeof s !== 'string') return s;
+  if (s.startsWith(VAULT_PREFIX)) {
+    if (!vaultKey) return '';
+    try { return gcmDecrypt(vaultKey, s.slice(VAULT_PREFIX.length)); } catch { return ''; }
+  }
+  if (s.startsWith(ENC_PREFIX)) {
+    try { return safeStorage.decryptString(Buffer.from(s.slice(ENC_PREFIX.length), 'base64')); } catch { return ''; }
+  }
+  return s;
+}
+
+// ── Known hosts (TOFU host key pinning) ─────────────────────────────────────────
+function knownHostsFile() { return path.join(app.getPath('userData'), 'known_hosts.json'); }
+function loadKnownHosts() { try { return JSON.parse(fs.readFileSync(knownHostsFile(), 'utf8')); } catch { return {}; } }
+function saveKnownHosts(kh) { try { fs.writeFileSync(knownHostsFile(), JSON.stringify(kh, null, 2)); } catch {} }
+function keyFingerprint(key) { return 'SHA256:' + crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, ''); }
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -24,6 +87,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       enableBlinkFeatures: 'Clipboard',
       webviewTag: true,
     }
@@ -32,7 +96,11 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  const m = loadVaultMeta();
+  vaultEnabled = !!(m && m.enabled);
+  createWindow();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 // SSH Connect
@@ -46,6 +114,20 @@ ipcMain.handle('ssh:connect', (event, { id, host, port, username, password, priv
       connOpts.tryKeyboard = true;
     }
 
+    // Host key verification (TOFU / accept-new): trust the key on first connect,
+    // refuse if a previously-seen host later presents a different key (possible MITM).
+    const hostId = `${host}:${port || 22}`;
+    let hostKeyStatus = null; // 'new' | 'ok' | 'changed'
+    let hostKeyFp = null;
+    connOpts.hostVerifier = (key, cb) => {
+      hostKeyFp = keyFingerprint(key);
+      const kh = loadKnownHosts();
+      const known = kh[hostId];
+      if (!known) { kh[hostId] = hostKeyFp; saveKnownHosts(kh); hostKeyStatus = 'new'; return cb(true); }
+      if (known === hostKeyFp) { hostKeyStatus = 'ok'; return cb(true); }
+      hostKeyStatus = 'changed'; return cb(false);
+    };
+
     conn.on('keyboard-interactive', (_name, _instr, _lang, prompts, finish) => {
       // Respond to each prompt (usually just password) with the saved password
       finish(prompts.map(() => password));
@@ -55,6 +137,8 @@ ipcMain.handle('ssh:connect', (event, { id, host, port, username, password, priv
       conn.shell({ term: 'xterm-256color' }, (err, stream) => {
         if (err) return reject(err.message);
         sessions.set(id, { conn, stream });
+        if (hostKeyStatus === 'new')
+          event.sender.send(`ssh:data:${id}`, `\x1b[33m[AOSSH] New host key for ${hostId} pinned: ${hostKeyFp}\x1b[0m\r\n`);
         stream.on('data', d => event.sender.send(`ssh:data:${id}`, d.toString()));
         stream.stderr.on('data', d => event.sender.send(`ssh:data:${id}`, d.toString()));
         stream.on('close', () => {
@@ -64,7 +148,11 @@ ipcMain.handle('ssh:connect', (event, { id, host, port, username, password, priv
         resolve({ ok: true });
       });
     });
-    conn.on('error', err => reject(err.message));
+    conn.on('error', err => {
+      if (hostKeyStatus === 'changed')
+        return reject(`Host key for ${hostId} has CHANGED — possible man-in-the-middle attack. Connection refused. If this change is expected, remove the host from known_hosts.json and reconnect. Presented key: ${hostKeyFp}`);
+      reject(err.message);
+    });
     conn.connect(connOpts);
   });
 });
@@ -170,17 +258,25 @@ ipcMain.handle('sftp:downloadDir', async (event, { id, remotePath }) => {
       const list = await new Promise((resolve, reject) =>
         sftp.readdir(remPath, (err, l) => err ? reject(err.message) : resolve(l))
       );
+      const baseResolved = path.resolve(localBase);
       for (const item of list) {
-        const rItem = remPath.replace(/\/$/, '') + '/' + item.filename;
-        const lItem = path.join(localPath, item.filename);
+        const fn = item.filename;
+        // Guard against path traversal / zip-slip from a malicious server:
+        // reject names with separators, dot-segments or NUL, and verify the
+        // resolved local path stays inside the chosen destination folder.
+        if (fn === '.' || fn === '..' || fn.includes('/') || fn.includes('\\') || fn.includes('\0')) continue;
+        const rItem = remPath.replace(/\/$/, '') + '/' + fn;
+        const lItem = path.join(localPath, fn);
+        const resolved = path.resolve(lItem);
+        if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) continue;
         if (item.attrs.isDirectory()) {
           await downloadRecursive(rItem, lItem);
         } else {
-          event.sender.send(`sftp:progress:${id}`, { name: item.filename, transferred: done, total: null });
+          event.sender.send(`sftp:progress:${id}`, { name: fn, transferred: done, total: null });
           await new Promise((resolve, reject) =>
             sftp.fastGet(rItem, lItem, {
               step: (transferred, chunk, total) =>
-                event.sender.send(`sftp:progress:${id}`, { name: item.filename, transferred, total }),
+                event.sender.send(`sftp:progress:${id}`, { name: fn, transferred, total }),
             }, err => err ? reject(err.message) : resolve())
           );
           done++;
@@ -222,7 +318,10 @@ ipcMain.handle('sftp:deleteDir', (_, { id, remotePath }) =>
         sftp.readdir(p, (err, l) => err ? rej(err.message) : res(l))
       );
       for (const item of list) {
-        const full = p.replace(/\/$/, '') + '/' + item.filename;
+        const fn = item.filename;
+        // Ignore any name a malicious server returns that could escape the target dir
+        if (fn === '.' || fn === '..' || fn.includes('/') || fn.includes('\\') || fn.includes('\0')) continue;
+        const full = p.replace(/\/$/, '') + '/' + fn;
         if (item.attrs.isDirectory()) await rmrf(full);
         else await new Promise((res, rej) =>
           sftp.unlink(full, err => err ? rej(err.message) : res())
@@ -292,12 +391,24 @@ ipcMain.handle('clipboard:write', (_, text) => {
 const configPath = path.join(app.getPath('userData'), 'connections.json');
 
 ipcMain.handle('config:load', () => {
-  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); }
-  catch { return []; }
+  if (vaultEnabled && !vaultKey) return [];   // locked — renderer must unlock first
+  try {
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const arr = Array.isArray(raw) ? raw : [];
+    // One-time migration: if any secret is still plaintext (from before encryption
+    // was added, or an imported file), re-encrypt the whole store on disk now.
+    const hasPlaintext = arr.some(c => c && typeof c.password === 'string' && c.password && !isEncrypted(c.password));
+    if (hasPlaintext && (vaultKey || safeStorage.isEncryptionAvailable())) {
+      try { fs.writeFileSync(configPath, JSON.stringify(arr.map(c => ({ ...c, password: encryptSecret(c.password) })), null, 2)); } catch {}
+    }
+    return arr.map(c => ({ ...c, password: decryptSecret(c.password) }));
+  } catch { return []; }
 });
 
 ipcMain.handle('config:save', (_, data) => {
-  fs.writeFileSync(configPath, JSON.stringify(data, null, 2));
+  if (vaultEnabled && !vaultKey) return { ok: false, error: 'Vault locked' };
+  const toStore = (Array.isArray(data) ? data : []).map(c => ({ ...c, password: encryptSecret(c.password) }));
+  fs.writeFileSync(configPath, JSON.stringify(toStore, null, 2));
   return { ok: true };
 });
 
@@ -311,13 +422,26 @@ ipcMain.handle('dialog:browse', async (_, opts) => {
 });
 
 ipcMain.handle('config:export', async () => {
+  const warn = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Cancel', 'Export anyway'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Export Connections',
+    message: 'The exported file will contain your passwords in readable form.',
+    detail: 'This is required so the file can be imported on another machine. Keep it somewhere safe and do not share it — anyone who opens it can read your saved passwords.',
+  });
+  if (warn.response !== 1) return { cancelled: true };
   const { filePath } = await dialog.showSaveDialog({
     title: 'Export Connections',
     defaultPath: 'aossh-connections.json',
     filters: [{ name: 'JSON', extensions: ['json'] }],
   });
   if (!filePath) return { cancelled: true };
-  fs.copyFileSync(configPath, filePath);
+  let data = [];
+  try { data = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+  const plain = (Array.isArray(data) ? data : []).map(c => ({ ...c, password: decryptSecret(c.password) }));
+  fs.writeFileSync(filePath, JSON.stringify(plain, null, 2));
   return { ok: true };
 });
 
@@ -450,8 +574,110 @@ function isNewerVersion(current, latest) {
   return false;
 }
 
-ipcMain.handle('app:openExternal', (_, url) => shell.openExternal(url));
+ipcMain.handle('app:openExternal', (_, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url);
+  return false;
+});
 ipcMain.handle('app:getVersion', () => app.getVersion());
+
+// ── Master-password vault ───────────────────────────────────────────────────────
+// Re-encrypt every stored secret from one key/scheme to another, in one pass.
+function reencryptStore(mapSecret) {
+  let arr = [];
+  try { arr = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+  arr = Array.isArray(arr) ? arr : [];
+  fs.writeFileSync(configPath, JSON.stringify(arr.map(c => ({ ...c, password: mapSecret(c.password) })), null, 2));
+}
+
+ipcMain.handle('vault:status', () => ({ enabled: vaultEnabled, unlocked: !!vaultKey }));
+
+ipcMain.handle('vault:unlock', (_, password) => {
+  const m = loadVaultMeta();
+  if (!m || !m.enabled) return { ok: false, error: 'Vault not enabled' };
+  try {
+    const key = deriveKey(password, m.salt);
+    gcmDecrypt(key, m.verifier);   // throws on wrong password (GCM auth fails)
+    vaultKey = key;
+    return { ok: true };
+  } catch { return { ok: false, error: 'Wrong password' }; }
+});
+
+ipcMain.handle('vault:lock', () => { vaultKey = null; return { ok: true }; });
+
+ipcMain.handle('vault:enable', (_, password) => {
+  if (vaultEnabled) return { ok: false, error: 'Already enabled' };
+  if (!password || String(password).length < 6) return { ok: false, error: 'Password too short' };
+  try {
+    const salt = crypto.randomBytes(16).toString('base64');
+    const key = deriveKey(password, salt);
+    const verifier = gcmEncrypt(key, 'AOSSH-VAULT-OK');
+    // Decrypt each secret with the CURRENT scheme (DPAPI/plaintext), then re-encrypt
+    // with the vault key. vaultKey is still null here, so decryptSecret uses v1/plain.
+    reencryptStore(pw => { const plain = decryptSecret(pw); return plain ? VAULT_PREFIX + gcmEncrypt(key, plain) : plain; });
+    saveVaultMeta({ enabled: true, kdf: 'scrypt', salt, N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p, keyLen: SCRYPT.keyLen, verifier });
+    vaultKey = key;
+    vaultEnabled = true;
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+
+ipcMain.handle('vault:disable', (_, password) => {
+  const m = loadVaultMeta();
+  if (!m || !m.enabled) return { ok: false, error: 'Not enabled' };
+  let key;
+  try { key = deriveKey(password, m.salt); gcmDecrypt(key, m.verifier); }
+  catch { return { ok: false, error: 'Wrong password' }; }
+  try {
+    // Decrypt v2 with the vault key, then re-encrypt with DPAPI (or leave plaintext).
+    reencryptStore(pw => {
+      let plain = pw;
+      if (typeof pw === 'string' && pw.startsWith(VAULT_PREFIX)) { try { plain = gcmDecrypt(key, pw.slice(VAULT_PREFIX.length)); } catch { plain = ''; } }
+      if (!plain || isEncrypted(plain)) return plain;
+      try { if (safeStorage.isEncryptionAvailable()) return ENC_PREFIX + safeStorage.encryptString(plain).toString('base64'); } catch {}
+      return plain;
+    });
+    try { fs.unlinkSync(vaultFile()); } catch {}
+    vaultKey = null; vaultEnabled = false;
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+
+ipcMain.handle('vault:change', (_, { oldPassword, newPassword }) => {
+  const m = loadVaultMeta();
+  if (!m || !m.enabled) return { ok: false, error: 'Not enabled' };
+  if (!newPassword || String(newPassword).length < 6) return { ok: false, error: 'Password too short' };
+  let oldKey;
+  try { oldKey = deriveKey(oldPassword, m.salt); gcmDecrypt(oldKey, m.verifier); }
+  catch { return { ok: false, error: 'Wrong current password' }; }
+  try {
+    const salt = crypto.randomBytes(16).toString('base64');
+    const newKey = deriveKey(newPassword, salt);
+    const verifier = gcmEncrypt(newKey, 'AOSSH-VAULT-OK');
+    reencryptStore(pw => {
+      let plain = pw;
+      if (typeof pw === 'string' && pw.startsWith(VAULT_PREFIX)) { try { plain = gcmDecrypt(oldKey, pw.slice(VAULT_PREFIX.length)); } catch { plain = ''; } }
+      return plain ? VAULT_PREFIX + gcmEncrypt(newKey, plain) : plain;
+    });
+    saveVaultMeta({ ...m, salt, verifier });
+    vaultKey = newKey;
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+
+ipcMain.handle('vault:secretCount', () => {
+  let arr = [];
+  try { arr = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+  arr = Array.isArray(arr) ? arr : [];
+  return arr.filter(c => c && typeof c.password === 'string' && c.password.length > 0).length;
+});
+
+ipcMain.handle('vault:reset', () => {
+  // Forgotten password: wipe saved passwords (unrecoverable), keep connections, disable vault.
+  try { reencryptStore(() => ''); } catch {}
+  try { fs.unlinkSync(vaultFile()); } catch {}
+  vaultKey = null; vaultEnabled = false;
+  return { ok: true };
+});
 
 // Window controls
 ipcMain.on('win:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());

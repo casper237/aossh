@@ -45,4 +45,13 @@ contextBridge.exposeInMainWorld('api', {
   checkUpdate:  ()    => ipcRenderer.invoke('app:checkUpdate'),
   openExternal: url   => ipcRenderer.invoke('app:openExternal', url),
   getVersion:   ()    => ipcRenderer.invoke('app:getVersion'),
+
+  vaultStatus:  () => ipcRenderer.invoke('vault:status'),
+  vaultUnlock:  pw => ipcRenderer.invoke('vault:unlock', pw),
+  vaultLock:    () => ipcRenderer.invoke('vault:lock'),
+  vaultEnable:  pw => ipcRenderer.invoke('vault:enable', pw),
+  vaultDisable: pw => ipcRenderer.invoke('vault:disable', pw),
+  vaultChange:  o  => ipcRenderer.invoke('vault:change', o),
+  vaultReset:      () => ipcRenderer.invoke('vault:reset'),
+  vaultSecretCount:() => ipcRenderer.invoke('vault:secretCount'),
 });

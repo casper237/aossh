@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.6] - 2026-07-04
+### Security
+- SSH host key verification (trust-on-first-use): the server's key is pinned on first connect, and connections are refused if a known host later presents a different key (man-in-the-middle protection)
+- Saved passwords are now encrypted at rest via Windows DPAPI — no longer stored in plaintext
+- Optional master password: encrypts saved passwords with a scrypt-derived key (AES-256-GCM), required at startup and stored nowhere
+- Fixed a script-injection flaw where a crafted file name on a server could run code inside the app
+- Hardened recursive SFTP folder download against path traversal
+- Updated Electron 28 → 42 (current, security-supported line) and tightened the Content Security Policy
+
+### Changed
+- Selecting a connection no longer rebuilds the list (fixes double-click-to-connect on newer Chromium)
+
 ## [1.3.5] - 2026-07-04
 ### Added
 - Auto-reconnect on connection drop: 10s countdown with retry until success, Ctrl+C to cancel
