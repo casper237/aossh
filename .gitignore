@@ -3,3 +3,5 @@
 /.graphify-venv
 /graphify-out
 /.claude
+/test-results
+/playwright-report

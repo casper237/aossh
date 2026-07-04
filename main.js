@@ -4,6 +4,9 @@ const fs = require('fs');
 const { Client } = require('ssh2');
 const os = require('os');
 const crypto = require('crypto');
+const { ENC_PREFIX, VAULT_PREFIX, SCRYPT, deriveKey, gcmEncrypt, gcmDecrypt, isEncrypted, keyFingerprint } = require('./lib/crypto');
+const { parseMobaXterm } = require('./lib/mobaxterm');
+const { isNewerVersion } = require('./lib/version');
 
 // Fix black screen on virtual machines and systems without GPU
 app.disableHardwareAcceleration();
@@ -18,36 +21,12 @@ const sessions = new Map();
 //   enc:v1:  Windows DPAPI via Electron safeStorage (user-account bound; default).
 //   enc:v2:  master-password vault — scrypt-derived key + AES-256-GCM (opt-in).
 // When the vault is enabled and unlocked, secrets are written as v2; otherwise v1.
-const ENC_PREFIX   = 'enc:v1:';
-const VAULT_PREFIX = 'enc:v2:';
-const SCRYPT = { N: 1 << 15, r: 8, p: 1, keyLen: 32, maxmem: 64 * 1024 * 1024 };
-
 let vaultEnabled = false;   // mirrors vault.json { enabled }
 let vaultKey = null;        // derived key Buffer, held only while unlocked
 
 function vaultFile() { return path.join(app.getPath('userData'), 'vault.json'); }
 function loadVaultMeta() { try { return JSON.parse(fs.readFileSync(vaultFile(), 'utf8')); } catch { return null; } }
 function saveVaultMeta(m) { fs.writeFileSync(vaultFile(), JSON.stringify(m, null, 2)); }
-
-function deriveKey(password, saltB64, opts) {
-  const o = opts || SCRYPT;
-  return crypto.scryptSync(String(password), Buffer.from(saltB64, 'base64'), SCRYPT.keyLen,
-    { N: o.N || SCRYPT.N, r: o.r || SCRYPT.r, p: o.p || SCRYPT.p, maxmem: SCRYPT.maxmem });
-}
-function gcmEncrypt(key, plaintext) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const ct = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
-  return Buffer.concat([iv, cipher.getAuthTag(), ct]).toString('base64');
-}
-function gcmDecrypt(key, b64) {
-  const buf = Buffer.from(b64, 'base64');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, buf.subarray(0, 12));
-  decipher.setAuthTag(buf.subarray(12, 28));
-  return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8');
-}
-
-function isEncrypted(s) { return typeof s === 'string' && (s.startsWith(ENC_PREFIX) || s.startsWith(VAULT_PREFIX)); }
 
 function encryptSecret(s) {
   if (!s || typeof s !== 'string' || isEncrypted(s)) return s;
@@ -74,7 +53,6 @@ function decryptSecret(s) {
 function knownHostsFile() { return path.join(app.getPath('userData'), 'known_hosts.json'); }
 function loadKnownHosts() { try { return JSON.parse(fs.readFileSync(knownHostsFile(), 'utf8')); } catch { return {}; } }
 function saveKnownHosts(kh) { try { fs.writeFileSync(knownHostsFile(), JSON.stringify(kh, null, 2)); } catch {} }
-function keyFingerprint(key) { return 'SHA256:' + crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, ''); }
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -475,73 +453,8 @@ ipcMain.handle('config:import:mobaxterm', async () => {
   if (!filePaths?.length) return { cancelled: true };
   try {
     const text = fs.readFileSync(filePaths[0], 'utf8');
-    const lines = text.split(/\r?\n/);
-    const connections = [];
-    let currentGroup = 'Imported';
-    let currentSubgroup = null;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      // Section header
-      if (line.startsWith('[Bookmarks')) {
-        // Look ahead for SubRep
-        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-          const next = lines[j].trim();
-          if (next.startsWith('SubRep=')) {
-            const subRep = next.slice(7).trim();
-            if (subRep.includes('\\')) {
-              const parts = subRep.split('\\');
-              currentGroup    = parts[0];
-              currentSubgroup = parts[1] || null;
-            } else {
-              currentGroup    = subRep || 'Imported';
-              currentSubgroup = null;
-            }
-            break;
-          }
-        }
-        continue;
-      }
-
-      // Skip service lines
-      if (line.startsWith('SubRep=') || line.startsWith('ImgNum=')) continue;
-
-      // Parse connection: name=#109#0%host%port%username%password%...
-      const eqIdx = line.indexOf('=');
-      if (eqIdx === -1) continue;
-      const name = line.slice(0, eqIdx).trim();
-      const val  = line.slice(eqIdx + 1).trim();
-
-      // Must be SSH type (#109#)
-      if (!val.includes('#109#')) continue;
-
-      // Extract the data part after #109#
-      const dataMatch = val.match(/#109#0%([^#]+)/);
-      if (!dataMatch) continue;
-
-      const parts    = dataMatch[1].split('%');
-      const host     = parts[0] || '';
-      const port     = parseInt(parts[1]) || 22;
-      const username = parts[2] || 'root';
-      const password = parts[3] || '';
-
-      if (!host) continue;
-
-      connections.push({
-        id: Date.now() + Math.random(),
-        name, host, port, username,
-        password: password || '',
-        authType: 'password',
-        privateKey: null,
-        group:    currentGroup,
-        subgroup: currentSubgroup,
-        status:   'offline',
-      });
-    }
-
-    return { ok: true, data: connections };
+    const data = parseMobaXterm(text).map(c => ({ id: Date.now() + Math.random(), status: 'offline', ...c }));
+    return { ok: true, data };
   } catch(e) { return { error: e.message }; }
 });
 
@@ -599,16 +512,6 @@ ipcMain.handle('app:checkUpdate', () => {
     req.setTimeout(8000, () => { req.destroy(); resolve({ hasUpdate: false }); });
   });
 });
-
-function isNewerVersion(current, latest) {
-  const parse = v => v.replace(/^v/, '').split('.').map(n => parseInt(n) || 0);
-  const a = parse(current), b = parse(latest);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if ((b[i] || 0) > (a[i] || 0)) return true;
-    if ((b[i] || 0) < (a[i] || 0)) return false;
-  }
-  return false;
-}
 
 ipcMain.handle('app:openExternal', (_, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url);
