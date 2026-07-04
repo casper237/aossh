@@ -29,9 +29,10 @@ function vaultFile() { return path.join(app.getPath('userData'), 'vault.json'); 
 function loadVaultMeta() { try { return JSON.parse(fs.readFileSync(vaultFile(), 'utf8')); } catch { return null; } }
 function saveVaultMeta(m) { fs.writeFileSync(vaultFile(), JSON.stringify(m, null, 2)); }
 
-function deriveKey(password, saltB64) {
+function deriveKey(password, saltB64, opts) {
+  const o = opts || SCRYPT;
   return crypto.scryptSync(String(password), Buffer.from(saltB64, 'base64'), SCRYPT.keyLen,
-    { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p, maxmem: SCRYPT.maxmem });
+    { N: o.N || SCRYPT.N, r: o.r || SCRYPT.r, p: o.p || SCRYPT.p, maxmem: SCRYPT.maxmem });
 }
 function gcmEncrypt(key, plaintext) {
   const iv = crypto.randomBytes(12);
@@ -445,6 +446,26 @@ ipcMain.handle('config:export', async () => {
   return { ok: true };
 });
 
+// Passphrase-encrypted, portable export (scrypt + AES-256-GCM). Unlike the DPAPI
+// store this can be decrypted on another machine with the passphrase.
+ipcMain.handle('config:exportEncrypted', async (_, passphrase) => {
+  if (!passphrase || String(passphrase).length < 6) return { error: 'Passphrase too short' };
+  const { filePath } = await dialog.showSaveDialog({
+    title: 'Export Connections (encrypted)',
+    defaultPath: 'aossh-connections.aossh',
+    filters: [{ name: 'AOSSH encrypted export', extensions: ['aossh'] }],
+  });
+  if (!filePath) return { cancelled: true };
+  let data = [];
+  try { data = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+  const plain = (Array.isArray(data) ? data : []).map(c => ({ ...c, password: decryptSecret(c.password) }));
+  const salt = crypto.randomBytes(16).toString('base64');
+  const key = deriveKey(passphrase, salt);
+  const blob = gcmEncrypt(key, JSON.stringify(plain));
+  fs.writeFileSync(filePath, JSON.stringify({ aossh_encrypted: 1, kdf: 'scrypt', N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p, salt, data: blob }, null, 2));
+  return { ok: true };
+});
+
 ipcMain.handle('config:import:mobaxterm', async () => {
   const { filePaths } = await dialog.showOpenDialog({
     title: 'Import from MobaXterm',
@@ -524,18 +545,33 @@ ipcMain.handle('config:import:mobaxterm', async () => {
   } catch(e) { return { error: e.message }; }
 });
 
+let _pendingImportRaw = null;   // stashed encrypted-import file awaiting its passphrase
+
 ipcMain.handle('config:import', async () => {
   const { filePaths } = await dialog.showOpenDialog({
     title: 'Import Connections',
-    filters: [{ name: 'JSON', extensions: ['json'] }],
+    filters: [{ name: 'AOSSH export', extensions: ['json', 'aossh'] }, { name: 'All Files', extensions: ['*'] }],
     properties: ['openFile'],
   });
   if (!filePaths?.length) return { cancelled: true };
   try {
-    const data = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
-    if (!Array.isArray(data)) return { error: 'Invalid format' };
-    return { ok: true, data };
+    const parsed = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+    if (parsed && parsed.aossh_encrypted) { _pendingImportRaw = parsed; return { encrypted: true }; }
+    if (!Array.isArray(parsed)) return { error: 'Invalid format' };
+    return { ok: true, data: parsed };
   } catch(e) { return { error: 'Invalid file: ' + e.message }; }
+});
+
+ipcMain.handle('config:importDecrypt', (_, passphrase) => {
+  const p = _pendingImportRaw;
+  if (!p) return { error: 'Nothing to decrypt' };
+  try {
+    const key = deriveKey(passphrase, p.salt, { N: p.N, r: p.r, p: p.p });
+    const arr = JSON.parse(gcmDecrypt(key, p.data));
+    if (!Array.isArray(arr)) return { error: 'Invalid format' };
+    _pendingImportRaw = null;
+    return { ok: true, data: arr };
+  } catch { return { error: 'Wrong passphrase' }; }
 });
 
 // Check for updates via GitHub releases

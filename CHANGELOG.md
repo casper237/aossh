@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.3.7] - 2026-07-04
+### Added
+- Passphrase-encrypted connection export: the export can now be protected with a passphrase (scrypt + AES-256-GCM), making the file safe to move between machines. Import automatically detects an encrypted file and asks for its passphrase. Plaintext export remains available with a warning.
+
 ## [1.3.6] - 2026-07-04
 ### Security
 - SSH host key verification (trust-on-first-use): the server's key is pinned on first connect, and connections are refused if a known host later presents a different key (man-in-the-middle protection)

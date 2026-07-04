@@ -32,7 +32,9 @@ contextBridge.exposeInMainWorld('api', {
   browseFile: o => ipcRenderer.invoke('dialog:browse', o),
 
   exportConnections: () => ipcRenderer.invoke('config:export'),
+  exportConnectionsEncrypted: pw => ipcRenderer.invoke('config:exportEncrypted', pw),
   importConnections: () => ipcRenderer.invoke('config:import'),
+  importDecrypt: pw => ipcRenderer.invoke('config:importDecrypt', pw),
   importMobaXterm:   () => ipcRenderer.invoke('config:import:mobaxterm'),
 
   loadConnections: () => ipcRenderer.invoke('config:load'),

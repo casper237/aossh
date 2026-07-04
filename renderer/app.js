@@ -120,6 +120,7 @@ function initDelegation() {
       case 'sftp-path':    navigateSftp(t.value); break;
       case 'vault-unlock': doVaultUnlock(); break;
       case 'vault-reset-confirm': doVaultReset(); break;
+      case 'import-decrypt': doImportDecrypt(); break;
     }
   });
 
@@ -165,9 +166,12 @@ function handleClickAction(action, el, e) {
     // Titlebar / tools
     case 'toggle-ai-panel':    toggleAiPanel(); break;
     case 'toggle-tools-menu':  toggleToolsMenu(e); break;
-    case 'export-connections': exportConnections(); break;
+    case 'export-connections': showExportModal(); break;
+    case 'export-encrypted':   doExportEncrypted(); break;
+    case 'export-plaintext':   doExportPlaintext(); break;
     case 'import-merge':       importConnections('merge'); break;
     case 'import-replace':     importConnections('replace'); break;
+    case 'import-decrypt':     doImportDecrypt(); break;
     case 'win-minimize':       window.api.minimize(); break;
     case 'win-maximize':       window.api.maximize(); break;
     case 'win-close':          window.api.close(); break;
@@ -587,32 +591,91 @@ function toggleToolsMenu(e) {
   menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
 }
 
-async function exportConnections() {
-  document.getElementById('tools-menu').style.display = 'none';
-  const result = await window.api.exportConnections();
-  if (result?.ok) showToast('✅ Exported successfully');
-  else if (result?.error) showToast('❌ ' + result.error);
+function showExportModal() {
+  const tm = document.getElementById('tools-menu'); if (tm) tm.style.display = 'none';
+  document.getElementById('modal-container').innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal" style="width:380px">
+        <h2>Export connections <span class="icon-btn" data-action="close-modal" style="font-size:18px">✕</span></h2>
+        <p style="color:#8b949e;font-size:13px;margin:0 0 12px">Encrypt the export with a passphrase so it's safe to move between machines. A plaintext file is readable by anyone who opens it.</p>
+        <div class="form-group"><label>Passphrase</label><input id="exp-pass" type="password" placeholder="At least 6 characters" /></div>
+        <div class="form-group"><label>Repeat passphrase</label><input id="exp-pass2" type="password" placeholder="Repeat" /></div>
+        <div class="modal-actions">
+          <button class="btn" data-action="export-plaintext">Export plaintext</button>
+          <button class="btn primary" data-action="export-encrypted">Export encrypted</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('exp-pass')?.focus(), 50);
+}
+
+async function doExportEncrypted() {
+  const p1 = document.getElementById('exp-pass')?.value || '';
+  const p2 = document.getElementById('exp-pass2')?.value || '';
+  if (p1.length < 6) { showToast('❌ Passphrase too short (min 6)'); return; }
+  if (p1 !== p2) { showToast('❌ Passphrases do not match'); return; }
+  const r = await window.api.exportConnectionsEncrypted(p1);
+  if (r?.cancelled) return;
+  if (r?.ok) { closeModal(); showToast('✅ Exported (encrypted)'); }
+  else showToast('❌ ' + (r?.error || 'Failed'));
+}
+
+async function doExportPlaintext() {
+  closeModal();
+  const r = await window.api.exportConnections();   // native warning + plaintext file
+  if (r?.ok) showToast('✅ Exported (plaintext)');
+  else if (r?.error) showToast('❌ ' + r.error);
 }
 
 async function importConnections(mode) {
-  document.getElementById('tools-menu').style.display = 'none';
+  const tm = document.getElementById('tools-menu'); if (tm) tm.style.display = 'none';
   const result = await window.api.importConnections();
   if (result?.cancelled) return;
   if (result?.error) { showToast('❌ ' + result.error); return; }
+  if (result?.encrypted) { window._importMode = mode; showImportPassphraseModal(); return; }
+  applyImport(mode, result.data);
+}
+
+function applyImport(mode, data) {
   if (mode === 'replace') {
-    connections = result.data.map(c => ({ ...c, status: 'offline' }));
+    connections = data.map(c => ({ ...c, status: 'offline' }));
   } else {
     // merge — skip duplicates by id
     const existingIds = new Set(connections.map(c => c.id));
-    const newConns = result.data
+    const newConns = data
       .filter(c => !existingIds.has(c.id))
       .map(c => ({ ...c, status: 'offline' }));
     connections = [...connections, ...newConns];
     showToast(`✅ Imported ${newConns.length} connection(s)`);
   }
-  await window.api.saveConnections(connections);
+  window.api.saveConnections(connections);
   renderSidebar('');
   if (mode === 'replace') showToast(`✅ Replaced with ${connections.length} connection(s)`);
+}
+
+function showImportPassphraseModal(err) {
+  document.getElementById('modal-container').innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal" style="width:360px">
+        <h2>Encrypted import <span class="icon-btn" data-action="close-modal" style="font-size:18px">✕</span></h2>
+        <p style="color:#8b949e;font-size:13px;margin:0 0 12px">This file is encrypted. Enter its passphrase.</p>
+        ${err ? `<p style="color:#f85149;font-size:12px;margin:0 0 12px">${escHtml(err)}</p>` : ''}
+        <div class="form-group"><input id="import-pass" type="password" placeholder="Passphrase" data-keydown="import-decrypt" /></div>
+        <div class="modal-actions">
+          <button class="btn" data-action="close-modal">Cancel</button>
+          <button class="btn primary" data-action="import-decrypt">Import</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('import-pass')?.focus(), 50);
+}
+
+async function doImportDecrypt() {
+  const pw = document.getElementById('import-pass')?.value || '';
+  const r = await window.api.importDecrypt(pw);
+  if (r?.error) { showImportPassphraseModal(r.error); return; }
+  closeModal();
+  applyImport(window._importMode || 'merge', r.data);
 }
 
 
