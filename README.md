@@ -4,13 +4,21 @@ A SSH & SFTP client built with Electron. Tested on Windows.
 
 ## Features
 
-- **SSH Terminal** — interactive shell with xterm.js
-- **SFTP File Manager** — browse, upload, download and delete files
-- **Connection Manager** — organize servers with groups and subgroups
+- **SSH Terminal** — interactive shell (xterm.js) with auto-reconnect on connection drop
+- **SFTP File Manager** — browse, upload, download, edit, rename and delete files; drag & drop upload
+- **Connection Manager** — organize servers with groups and subgroups; import from MobaXterm
+- **AI Assistant Panel** — built-in tabs for ChatGPT, Claude, Gemini, Grok, Perplexity (bring your own account)
 - **Context Menu** — connect, edit, move, delete via right-click
 - **Clipboard Support** — Ctrl+V and right-click paste in terminal
-- **Export / Import** — backup and restore your connections
 - **Multi-tab** — connect to multiple servers at once
+- **Export / Import** — back up and restore connections, optionally passphrase-encrypted
+
+## Security
+
+- **Host key verification** — the server's key is pinned on first connect; connections are refused if a known host later presents a different key (man-in-the-middle protection)
+- **Encrypted credential storage** — saved passwords are encrypted at rest via Windows DPAPI, never stored in plaintext
+- **Optional master password** — encrypt saved passwords with a passphrase (scrypt + AES-256-GCM), required at startup and stored nowhere. Enable it in **⚙️ → Security → Master password**
+- **Encrypted export** — connection exports can be protected with a passphrase for safe transfer between machines
 
 ## Installation
 

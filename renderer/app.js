@@ -1080,6 +1080,13 @@ function renderPane() {
             <div class="manual-item"><span class="manual-key">Tabs</span> — ChatGPT, Claude, Gemini, Grok, Perplexity</div>
             <div class="manual-item"><span class="manual-key">Sessions saved</span> — stay logged in between restarts</div>
           </div>
+          <div class="manual-section">
+            <div class="manual-title">🔐 Security</div>
+            <div class="manual-item"><span class="manual-key">Host key</span> — verified on connect; warns if a known server's key changes</div>
+            <div class="manual-item"><span class="manual-key">Passwords</span> — encrypted on disk, never stored in plaintext</div>
+            <div class="manual-item"><span class="manual-key">⚙️ → Master password</span> — encrypt with a passphrase, asked at startup</div>
+            <div class="manual-item"><span class="manual-key">Export</span> — optionally passphrase-encrypted for safe transfer</div>
+          </div>
         </div>
       </div>`;
     window.api.getVersion().then(v => {
