@@ -41,7 +41,15 @@ ipcMain.handle('ssh:connect', (event, { id, host, port, username, password, priv
     const conn = new Client();
     const connOpts = { host, port: port || 22, username };
     if (privateKey) connOpts.privateKey = fs.readFileSync(privateKey);
-    else connOpts.password = password;
+    else {
+      connOpts.password = password;
+      connOpts.tryKeyboard = true;
+    }
+
+    conn.on('keyboard-interactive', (_name, _instr, _lang, prompts, finish) => {
+      // Respond to each prompt (usually just password) with the saved password
+      finish(prompts.map(() => password));
+    });
 
     conn.on('ready', () => {
       conn.shell({ term: 'xterm-256color' }, (err, stream) => {

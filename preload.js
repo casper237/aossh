@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('api', {
   disconnect: o => ipcRenderer.invoke('ssh:disconnect', o),
   onData:          (id, cb) => ipcRenderer.on(`ssh:data:${id}`, (_, d) => cb(d)),
   onClosed:        (id, cb) => ipcRenderer.on(`ssh:closed:${id}`, cb),
+  removeListeners: id => {
+    ipcRenderer.removeAllListeners(`ssh:data:${id}`);
+    ipcRenderer.removeAllListeners(`ssh:closed:${id}`);
+  },
   onSftpProgress:  (id, cb) => ipcRenderer.on(`sftp:progress:${id}`, (_, d) => cb(d)),
 
   sftpList:        o => ipcRenderer.invoke('sftp:list', o),

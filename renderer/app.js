@@ -729,10 +729,92 @@ function renderPane() {
 }
 
 // ── Terminal ──────────────────────────────────────────────────────────────────
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Establish (or re-establish) SSH connection and register IPC data/close listeners.
+// Returns a promise that resolves on success, rejects on failure.
+function doSshConnect(tab, term, conn) {
+  const id = String(tab.id);
+  conn.status = 'connecting'; renderSidebar('');
+  window.api.removeListeners(id);
+  return window.api.connect({ id, host:conn.host, port:conn.port||22, username:conn.username, password:conn.password, privateKey:conn.privateKey||null })
+    .then(() => {
+      conn.status = 'online'; renderSidebar('');
+      if (terminals[tab.id]) terminals[tab.id].reconnectCancel = null;
+      window.api.onData(id, d => term.write(d));
+      window.api.onClosed(id, () => {
+        term.writeln('\x1b[1;31m\r\nConnection closed.\x1b[0m');
+        conn.status = 'offline'; renderSidebar('');
+        startReconnect(tab, term, conn);
+      });
+    });
+}
+
+// Auto-reconnect loop with countdown. Runs until connected or cancelled by Ctrl+C.
+async function startReconnect(tab, term, conn) {
+  const entry = terminals[tab.id];
+  if (!entry) return;
+
+  let cancelled = false;
+  entry.reconnectCancel = () => {
+    cancelled = true;
+    entry.reconnectCancel = null;
+    term.writeln('\x1b[33m\r\nReconnect cancelled.\x1b[0m');
+  };
+
+  let attempt = 0;
+  const delay = 10;
+
+  while (!cancelled) {
+    attempt++;
+    // Countdown
+    for (let i = delay; i > 0; i--) {
+      if (cancelled) return;
+      term.write(`\r\x1b[33mReconnecting in ${i}s... [Ctrl+C to cancel]\x1b[0m`);
+      await sleep(1000);
+    }
+    if (cancelled) return;
+
+    term.writeln(`\r\x1b[1;34mAttempt ${attempt}...\x1b[0m`);
+    try {
+      await doSshConnect(tab, term, conn);
+      term.writeln('\x1b[1;32mReconnected!\x1b[0m');
+      return;
+    } catch (_) {
+      conn.status = 'offline'; renderSidebar('');
+      // loop continues → next countdown
+    }
+  }
+}
+
+function fitTerm(term, fitAddon) {
+  fitAddon.fit();
+  term.resize(term.cols, Math.max(1, term.rows - 1));
+}
+
+function makeResizeObserver(tab, term, fitAddon) {
+  const id = String(tab.id);
+  const ro = new ResizeObserver(() => {
+    fitTerm(term, fitAddon);
+    window.api.resize({ id, cols: term.cols, rows: term.rows });
+  });
+  return ro;
+}
+
 function initTerminal(tab) {
   if (terminals[tab.id]) {
     const c = document.getElementById('terminal-container');
-    if (c) { terminals[tab.id].term.open(c); setTimeout(() => terminals[tab.id].fitAddon.fit(), 50); }
+    if (c) {
+      const entry = terminals[tab.id];
+      if (entry.resizeObserver) entry.resizeObserver.disconnect();
+      entry.term.open(c);
+      setTimeout(() => {
+        fitTerm(entry.term, entry.fitAddon);
+        window.api.resize({ id: String(tab.id), cols: entry.term.cols, rows: entry.term.rows });
+        entry.resizeObserver = makeResizeObserver(tab, entry.term, entry.fitAddon);
+        entry.resizeObserver.observe(c);
+      }, 50);
+    }
     return;
   }
   const conn = connections.find(c => c.id === tab.connId);
@@ -743,87 +825,85 @@ function initTerminal(tab) {
   const container = document.getElementById('terminal-container');
   if (!container) return;
   term.open(container);
-  // Give fitAddon correct dimensions accounting for footer
   setTimeout(() => {
-    fitAddon.fit();
-    // Force one row less to avoid clipping
-    term.resize(term.cols, term.rows - 1);
+    fitTerm(term, fitAddon);
+    window.api.resize({ id: String(tab.id), cols: term.cols, rows: term.rows });
   }, 50);
-  terminals[tab.id] = { term, fitAddon };
+  terminals[tab.id] = { term, fitAddon, reconnectCancel: null, resizeObserver: null };
   if (!conn) { term.writeln('\x1b[1;31mConnection config not found.\x1b[0m'); return; }
-  term.writeln(`\x1b[1;34mConnecting to ${conn.host}:${conn.port||22}...\x1b[0m`);
-  conn.status = 'connecting'; renderSidebar('');
-  window.api.connect({ id:String(tab.id), host:conn.host, port:conn.port||22, username:conn.username, password:conn.password, privateKey:conn.privateKey||null })
-    .then(() => {
-      conn.status = 'online'; renderSidebar('');
-      window.api.onData(String(tab.id), d => term.write(d));
-      window.api.onClosed(String(tab.id), () => { term.writeln('\x1b[1;31m\r\nConnection closed.\x1b[0m'); conn.status='offline'; renderSidebar(''); });
-      term.onData(d => window.api.write({ id:String(tab.id), data:d }));
 
-      // Paste text respecting bracketed paste mode (fixes YAML/indentation corruption)
-      const pasteToTerminal = text => {
-        if (!text) return;
-        const bracketed = terminals[tab.id]?.term?.modes?.bracketedPasteMode;
-        const data = bracketed ? '\x1b[200~' + text + '\x1b[201~' : text;
-        window.api.write({ id: String(tab.id), data });
-      };
+  // Keystrokes → SSH (registered once; works across reconnects via same tab id)
+  term.onData(d => window.api.write({ id:String(tab.id), data:d }));
 
-      // Ctrl+V paste, Ctrl+C copy, Shift+Insert paste (for Windows Server VMs)
-      term.attachCustomKeyEventHandler(e => {
-        if (e.type !== 'keydown') return true;
-        if ((e.ctrlKey && e.code === 'KeyV') || (e.code === 'Insert' && e.shiftKey)) {
-          window.api.clipboardRead().then(pasteToTerminal);
-          return false;
-        }
-        if (e.ctrlKey && e.code === 'KeyC' && term.hasSelection()) {
-          window.api.clipboardWrite(term.getSelection());
-          return false;
-        }
-        return true;
-      });
+  // Paste text respecting bracketed paste mode (fixes YAML/indentation corruption)
+  const pasteToTerminal = text => {
+    if (!text) return;
+    const bracketed = terminals[tab.id]?.term?.modes?.bracketedPasteMode;
+    const data = bracketed ? '\x1b[200~' + text + '\x1b[201~' : text;
+    window.api.write({ id: String(tab.id), data });
+  };
 
-      // Auto-copy on mouse selection
-      term.onSelectionChange(() => {
-        const sel = term.getSelection();
-        if (sel) window.api.clipboardWrite(sel);
-      });
-
-      // Register window-level paste/contextmenu handlers once (shared across all tabs).
-      // Window-level capture fires before xterm's own document/window listeners,
-      // preventing double-paste on Ctrl+V and enabling right-click paste.
-      if (!terminalPasteHandlersRegistered) {
-        terminalPasteHandlersRegistered = true;
-
-        // Block paste events so xterm never processes them (our Ctrl+V handler does it)
-        window.addEventListener('paste', e => {
-          const tc = document.getElementById('terminal-container');
-          if (tc && tc.contains(e.target)) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-          }
-        }, true);
-
-        // Right-click → paste clipboard into active terminal
-        window.addEventListener('contextmenu', e => {
-          const tc = document.getElementById('terminal-container');
-          if (!tc || !tc.contains(e.target)) return;
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          const tid = activeTabId;
-          const bracketed = terminals[tid]?.term?.modes?.bracketedPasteMode;
-          window.api.clipboardRead().then(text => {
-            if (!text) return;
-            window.api.write({ id: String(tid), data: bracketed ? '\x1b[200~' + text + '\x1b[201~' : text });
-          });
-        }, true);
+  // Ctrl+V paste, Ctrl+C copy/cancel-reconnect, Shift+Insert paste
+  term.attachCustomKeyEventHandler(e => {
+    if (e.type !== 'keydown') return true;
+    if ((e.ctrlKey && e.code === 'KeyV') || (e.code === 'Insert' && e.shiftKey)) {
+      window.api.clipboardRead().then(pasteToTerminal);
+      return false;
+    }
+    if (e.ctrlKey && e.code === 'KeyC') {
+      if (term.hasSelection()) {
+        window.api.clipboardWrite(term.getSelection());
+        return false;
       }
+      // Cancel pending reconnect if active
+      const entry = terminals[tab.id];
+      if (entry?.reconnectCancel) { entry.reconnectCancel(); return false; }
+    }
+    return true;
+  });
 
-      new ResizeObserver(() => {
-        fitAddon.fit();
-        term.resize(term.cols, Math.max(1, term.rows - 1));
-        window.api.resize({ id:String(tab.id), cols:term.cols, rows:term.rows });
-      }).observe(container);
-    })
+  // Auto-copy on mouse selection
+  term.onSelectionChange(() => {
+    const sel = term.getSelection();
+    if (sel) window.api.clipboardWrite(sel);
+  });
+
+  // Register window-level paste/contextmenu handlers once (shared across all tabs).
+  // Window-level capture fires before xterm's own document/window listeners,
+  // preventing double-paste on Ctrl+V and enabling right-click paste.
+  if (!terminalPasteHandlersRegistered) {
+    terminalPasteHandlersRegistered = true;
+
+    // Block paste events so xterm never processes them (our Ctrl+V handler does it)
+    window.addEventListener('paste', e => {
+      const tc = document.getElementById('terminal-container');
+      if (tc && tc.contains(e.target)) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    }, true);
+
+    // Right-click → paste clipboard into active terminal
+    window.addEventListener('contextmenu', e => {
+      const tc = document.getElementById('terminal-container');
+      if (!tc || !tc.contains(e.target)) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      const tid = activeTabId;
+      const bracketed = terminals[tid]?.term?.modes?.bracketedPasteMode;
+      window.api.clipboardRead().then(text => {
+        if (!text) return;
+        window.api.write({ id: String(tid), data: bracketed ? '\x1b[200~' + text + '\x1b[201~' : text });
+      });
+    }, true);
+  }
+
+  const ro = makeResizeObserver(tab, term, fitAddon);
+  ro.observe(container);
+  terminals[tab.id].resizeObserver = ro;
+
+  term.writeln(`\x1b[1;34mConnecting to ${conn.host}:${conn.port||22}...\x1b[0m`);
+  doSshConnect(tab, term, conn)
     .catch(err => { term.writeln(`\x1b[1;31mConnection failed: ${err}\x1b[0m`); conn.status='offline'; renderSidebar(''); });
 }
 
