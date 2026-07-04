@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.5] - 2026-07-04
+### Added
+- Auto-reconnect on connection drop: 10s countdown with retry until success, Ctrl+C to cancel
+- Keyboard-interactive authentication support (servers that prompt for password interactively)
+
+### Fixed
+- Modal dialogs no longer close accidentally when text selection or mouse release ends on the overlay
+- Terminal now refits and resizes the remote PTY when the window or panel size changes
+
 ## [1.3.4] - 2026-03-19
 ### Fixed
 - Ctrl+V no longer doubles input in terminal (window-level paste capture)
