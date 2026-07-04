@@ -1208,12 +1208,20 @@ function initTerminal(tab) {
   }
   const conn = connections.find(c => c.id === tab.connId);
   const termTheme = { background:'#0d1117', foreground:'#c9d1d9', cursor:'#58a6ff', selectionBackground:'rgba(88,166,255,0.3)' };
-  const term = new Terminal({ cursorBlink:true, fontSize:13, fontFamily:"'Cascadia Code','JetBrains Mono','Fira Code',monospace", theme:termTheme, scrollback:5000, scrollOnUserInput:true });
+  const term = new Terminal({ cursorBlink:true, fontSize:13, fontFamily:"'Cascadia Code','JetBrains Mono','Fira Code','Consolas',monospace", theme:termTheme, scrollback:5000, scrollOnUserInput:true });
+  // Correct character widths (emoji, box-drawing, CJK, braille spinners) so the
+  // monospace grid stays aligned in rich TUIs. Without this xterm uses old
+  // Unicode 6 width tables and text drifts / words merge.
+  try { term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = '11'; } catch (e) {}
   const fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
   const container = document.getElementById('terminal-container');
   if (!container) return;
   term.open(container);
+  // Canvas renderer: far more accurate than the default DOM renderer for
+  // fast-redrawing TUIs, and works without a GPU (WebGL is unavailable here
+  // because hardware acceleration is disabled). Falls back to DOM if it fails.
+  try { term.loadAddon(new CanvasAddon.CanvasAddon()); } catch (e) {}
   setTimeout(() => {
     fitTerm(term, fitAddon);
     window.api.resize({ id: String(tab.id), cols: term.cols, rows: term.rows });

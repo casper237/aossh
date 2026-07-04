@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.3.8] - 2026-07-04
+### Fixed
+- Terminal rendering in rich full-screen TUIs (e.g. Claude Code, htop, mc): switched to the canvas renderer and added Unicode 11 character-width handling, fixing merged words, dropped spaces and misaligned box-drawing/emoji. Added Consolas to the font fallback for full Cyrillic coverage.
+
 ## [1.3.7] - 2026-07-04
 ### Added
 - Passphrase-encrypted connection export: the export can now be protected with a passphrase (scrypt + AES-256-GCM), making the file safe to move between machines. Import automatically detects an encrypted file and asks for its passphrase. Plaintext export remains available with a warning.
