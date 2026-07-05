@@ -1426,7 +1426,7 @@ async function sftpHandleDrop(e, el) {
   const tab = tabs.find(t => t.id===activeTabId); if (!tab) return;
   const files = [...e.dataTransfer.files];
   if (!files.length) return;
-  const localPaths = files.map(f => f.path).filter(Boolean);
+  const localPaths = files.map(f => window.api.getPathForFile(f)).filter(Boolean);
   if (!localPaths.length) return;
   showToast(`⬆ Uploading ${localPaths.length} file(s)...`);
   try {

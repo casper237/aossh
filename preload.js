@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   connect:    o => ipcRenderer.invoke('ssh:connect', o),
@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('api', {
   clipboardWrite: t  => ipcRenderer.invoke('clipboard:write', t),
 
   browseFile: o => ipcRenderer.invoke('dialog:browse', o),
+
+  // Electron 32+ removed File.path; this is the supported way to get a dropped
+  // file's absolute path for SFTP upload.
+  getPathForFile: file => { try { return webUtils.getPathForFile(file); } catch { return file?.path || ''; } },
 
   exportConnections: () => ipcRenderer.invoke('config:export'),
   exportConnectionsEncrypted: pw => ipcRenderer.invoke('config:exportEncrypted', pw),

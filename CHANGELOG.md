@@ -3,6 +3,7 @@
 ## [1.3.8] - 2026-07-04
 ### Fixed
 - Terminal rendering in rich full-screen TUIs (e.g. Claude Code, htop, mc): switched to the canvas renderer and added Unicode 11 character-width handling, fixing merged words, dropped spaces and misaligned box-drawing/emoji. Added Consolas to the font fallback for full Cyrillic coverage.
+- Drag-and-drop upload into the SFTP panel: dropped files were silently ignored since the Electron 42 upgrade (`File.path` was removed in Electron 32+); file paths are now resolved via `webUtils.getPathForFile`.
 
 ## [1.3.7] - 2026-07-04
 ### Added
